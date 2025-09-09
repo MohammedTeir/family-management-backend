@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth, comparePasswords, hashPassword } from "./auth";
 import { storage } from "./storage";
-import { insertFamilySchema, insertMemberSchema, insertRequestSchema, insertNotificationSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema } from "./schema.js";
+import { insertFamilySchema, insertWifeSchema, insertMemberSchema, insertRequestSchema, insertNotificationSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema } from "./schema.js";
 import { z } from "zod";
 import passport from "passport";
 import multer from "multer";
@@ -54,10 +54,43 @@ export function registerRoutes(app: Express): Server {
     try {
       const { username, password } = req.body;
       
+      // Special case: If password is empty/null/undefined, look for user with head role by identity number
+      if (!password || password === "" || password === null || password === undefined) {
+        const user = await storage.getUserByUsername(username);
+        if (!user) {
+          return res.status(401).send("معلومات الدخول خاطئة - راجع لجنة العائلة");
+        }
+        
+        // Allow heads OR admins with 9-digit usernames (promoted heads) to login without password
+        const isPromotedHead = user.role === 'admin' && /^\d{9}$/.test(user.username);
+        if (user.role !== 'head' && !isPromotedHead) {
+          return res.status(401).send("فشل تسجيل الدخول: كلمة المرور مطلوبة");
+        }
+        
+        // Check if account is locked out
+        if (user.lockoutUntil && new Date() < user.lockoutUntil) {
+          const remainingMinutes = Math.ceil((user.lockoutUntil.getTime() - new Date().getTime()) / (1000 * 60));
+          return res.status(423).send(`الحساب محظور مؤقتاً. يرجى المحاولة بعد ${remainingMinutes} دقيقة`);
+        }
+        
+        // Login successful for head - reset failed attempts
+        await storage.updateUser(user.id, {
+          failedLoginAttempts: 0,
+          lockoutUntil: null
+        });
+        
+        // Complete the login process
+        req.login(user, (err: any) => {
+          if (err) return next(err);
+          res.status(200).json(user);
+        });
+        return;
+      }
+      
       // Get user by username first to check lockout status
       const user = await storage.getUserByUsername(username);
       if (!user) {
-        return res.status(401).send("فشل تسجيل الدخول: اسم المستخدم أو كلمة المرور غير صحيحة");
+        return res.status(401).send("معلومات الدخول خاطئة - راجع لجنة العائلة");
       }
       
       // Check if account is locked out
@@ -126,8 +159,9 @@ export function registerRoutes(app: Express): Server {
       // Allow dual-role admin to access their family
       const family = await storage.getFamilyByUserId(req.user!.id);
       if (!family) return res.status(404).json({ message: "Family not found" });
+      const wives = await storage.getWivesByFamilyId(family.id);
       const members = await storage.getMembersByFamilyId(family.id);
-      res.json({ ...family, members });
+      res.json({ ...family, wives, members });
     } catch (error) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -302,6 +336,100 @@ export function registerRoutes(app: Express): Server {
   }
  });
 
+  // Wife routes
+  app.get("/api/family/:familyId/wives", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const familyId = parseInt(req.params.familyId);
+      const family = await storage.getFamily(familyId);
+      if (!family) return res.status(404).json({ message: "Family not found" });
+      
+      if (isHeadOrDualRole(req.user!, family) && family.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const wives = await storage.getWivesByFamilyId(familyId);
+      res.json(wives);
+    } catch (error) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/wives", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const family = await storage.getFamilyByUserId(req.user!.id);
+      if (!family) {
+        return res.status(404).json({ message: "Family not found" });
+      }
+      
+      if (isHeadOrDualRole(req.user!, family)) {
+        const wifeDataSchema = insertWifeSchema.omit({ familyId: true });
+        const parsedData = wifeDataSchema.parse(req.body);
+        const wifeData = { ...parsedData, familyId: family.id };
+        const wife = await storage.createWife(wifeData);
+        res.status(201).json(wife);
+      } else {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.put("/api/wives/:id", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const id = parseInt(req.params.id);
+      const wifeData = insertWifeSchema.partial().parse(req.body);
+      const wife = await storage.getWife(id);
+      if (!wife) return res.status(404).json({ message: "Wife not found" });
+      
+      const family = await storage.getFamily(wife.familyId);
+      if (!family) return res.status(404).json({ message: "Family not found" });
+      
+      if (isHeadOrDualRole(req.user!, family) && family.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const updatedWife = await storage.updateWife(id, wifeData);
+      if (!updatedWife) return res.status(404).json({ message: "Wife not found" });
+      
+      res.json(updatedWife);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/wives/:id", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const id = parseInt(req.params.id);
+      const wife = await storage.getWife(id);
+      if (!wife) return res.status(404).json({ message: "Wife not found" });
+      
+      const family = await storage.getFamily(wife.familyId);
+      if (!family) return res.status(404).json({ message: "Family not found" });
+      
+      if (isHeadOrDualRole(req.user!, family) && family.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const success = await storage.deleteWife(id);
+      if (!success) return res.status(404).json({ message: "Wife not found" });
+      
+      res.sendStatus(204);
+    } catch (error) {
+      console.error('Server: Error deleting wife:', error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
 
   // Request routes
   app.get("/api/requests", async (req, res) => {
@@ -486,9 +614,10 @@ export function registerRoutes(app: Express): Server {
       const id = parseInt(req.params.id);
       const family = await getFamilyByIdOrDualRole(id);
       if (!family) return res.status(404).json({ message: "Family not found" });
+      const wives = await storage.getWivesByFamilyId(family.id);
       const members = await storage.getMembersByFamilyId(family.id);
       const requests = await storage.getRequestsByFamilyId(family.id);
-      res.json({ ...family, members, requests });
+      res.json({ ...family, wives, members, requests });
     } catch (error) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -531,8 +660,7 @@ export function registerRoutes(app: Express): Server {
     const familyId = parseInt(req.params.id);
       const family = await getFamilyByIdOrDualRole(familyId);
       if (!family) return res.status(404).json({ message: "Family not found" });
-    const memberData = insertMemberSchema.omit({ familyId: true }).parse(req.body);
-    memberData.familyId = familyId;
+    const memberData = { ...insertMemberSchema.omit({ familyId: true }).parse(req.body), familyId };
     const member = await storage.createMember(memberData);
     res.status(201).json(member);
   } catch (error) {
@@ -557,7 +685,7 @@ export function registerRoutes(app: Express): Server {
       // Create user
       const user = await storage.createUser({
         username: familyData.husbandID,
-        password: await hashPassword(userData.password), // <-- hash the password!
+        password: userData.password ? await hashPassword(userData.password) : await hashPassword(familyData.husbandID),
         role: 'head',
         phone: familyData.primaryPhone
       });
@@ -578,11 +706,17 @@ export function registerRoutes(app: Express): Server {
         }
       }
       
-      // Log in the user
-      req.login(user, (err) => {
-        if (err) return res.status(500).json({ message: "Registration successful but login failed" });
+      // Only log in the user if they provided a password (self-registration)
+      // If no password provided, this is admin creating a head, so don't auto-login
+      if (userData.password) {
+        req.login(user, (err) => {
+          if (err) return res.status(500).json({ message: "Registration successful but login failed" });
+          res.status(201).json({ user, family });
+        });
+      } else {
+        // Admin creating head - don't auto-login
         res.status(201).json({ user, family });
-      });
+      }
     } catch (error: any) {
     if (error.code === "23505") {
       return res.status(400).json({ message: "رقم الهوية مسجل مسبقاً" });
