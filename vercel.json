@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "index": {
-      "runtime": "nodejs20.x"
-    }
-  }
-}
