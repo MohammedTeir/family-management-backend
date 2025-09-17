@@ -2,7 +2,7 @@
   command = "npm run build"
   functions = "netlify/functions"
   publish = "dist"
-  environment = { SECRETS_SCAN_OMIT_PATHS = ".env,.env.bak,render.yaml,vercel.json,node_modules/**/*" }
+  environment = { SECRETS_SCAN_OMIT_KEYS = "NODE_ENV", SECRETS_SCAN_OMIT_PATHS = ".env,.env.bak,render.yaml,vercel.json,node_modules/**/*,dist/**/*,netlify/functions/**/*,src/**/*,package.json" }
 
 [functions]
   node_bundler = "esbuild"
