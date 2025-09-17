@@ -84,6 +84,10 @@ export function setupAuth(app: Express) {
   // Determine if we're actually running on HTTPS
   const isHttps = frontendUrl.startsWith('https://') || process.env.NODE_ENV === "production";
   
+  // Check if frontend and backend are on same domain
+  const frontendHost = new URL(frontendUrl).hostname;
+  const isSameDomain = frontendHost === 'localhost' || process.env.SAME_DOMAIN === 'true';
+  
   const sessionSettings: session.SessionOptions = {
     secret: sessionSecret,
     resave: false,
@@ -93,7 +97,7 @@ export function setupAuth(app: Express) {
       secure: isHttps, // Only secure for HTTPS
       httpOnly: true,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      sameSite: isHttps ? "none" : "lax", // "none" for cross-origin HTTPS, "lax" for local
+      sameSite: isSameDomain ? "lax" : (isHttps ? "none" : "lax"), // "lax" for same domain, "none" for cross-domain HTTPS
     },
   };
 
