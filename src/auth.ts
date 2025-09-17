@@ -76,16 +76,24 @@ export async function comparePasswords(supplied: string, stored: string) {
 }
 
 export function setupAuth(app: Express) {
+  // Ensure we have a session secret
+  const sessionSecret = process.env.SESSION_SECRET || 'fallback-secret-for-development-only';
+  const isProduction = process.env.NODE_ENV === "production";
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  
+  // Determine if we're actually running on HTTPS
+  const isHttps = frontendUrl.startsWith('https://') || process.env.NODE_ENV === "production";
+  
   const sessionSettings: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET!,
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     store: storage.sessionStore,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: isHttps, // Only secure for HTTPS
       httpOnly: true,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      sameSite: isHttps ? "none" : "lax", // "none" for cross-origin HTTPS, "lax" for local
     },
   };
 
