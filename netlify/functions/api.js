@@ -195,6 +195,8 @@ var init_schema = __esm({
       orphanName: text("orphan_name").notNull(),
       orphanBirthDate: varchar("orphan_birth_date", { length: 10 }).notNull(),
       orphanID: varchar("orphan_id", { length: 20 }).notNull(),
+      gender: varchar("gender", { length: 10 }).default("male"),
+      // 'male', 'female'
       guardianName: text("guardian_name").notNull(),
       guardianID: varchar("guardian_id", { length: 20 }).notNull(),
       guardianBirthDate: varchar("guardian_birth_date", { length: 10 }).notNull(),
@@ -209,6 +211,8 @@ var init_schema = __esm({
       originalAddress: text("original_address").notNull(),
       mobileNumber: varchar("mobile_number", { length: 20 }).notNull(),
       backupMobileNumber: varchar("backup_mobile_number", { length: 20 }).notNull(),
+      image: text("image"),
+      // Image field for orphan photos
       createdAt: timestamp("created_at").defaultNow()
     }, (table) => ({
       familyIdIdx: index("orphans_family_id_idx").on(table.familyId),
@@ -332,7 +336,7 @@ var init_schema = __esm({
       id: true,
       createdAt: true
     }).extend({
-      gender: z.enum(["male", "female", "other"]).optional()
+      gender: z.enum(["male", "female"]).optional()
     });
     insertFamilySchema = createInsertSchema(families2).omit({
       id: true,
@@ -351,6 +355,7 @@ var init_schema = __esm({
       fatherID: z.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0627\u0628 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645"),
       mobileNumber: z.string().regex(/^\d{10}$/, "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 10 \u0623\u0631\u0642\u0627\u0645"),
       backupMobileNumber: z.string().regex(/^\d{10}$/, "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 10 \u0623\u0631\u0642\u0627\u0645"),
+      gender: z.enum(["male", "female"]).optional(),
       martyrdomType: z.enum(["war_2023", "pre_2023_war", "natural_death"], {
         required_error: "\u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u0641\u0627\u0629 \u0645\u0637\u0644\u0648\u0628\u0629",
         invalid_type_error: "\u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u0641\u0627\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629"
@@ -515,7 +520,7 @@ var init_db_retry = __esm({
 });
 
 // src/storage.ts
-import { eq as eq2, desc, and, sql, isNull } from "drizzle-orm";
+import { eq as eq2, desc, and, sql, isNull, inArray } from "drizzle-orm";
 var DatabaseStorage, storage;
 var init_storage = __esm({
   "src/storage.ts"() {
@@ -556,6 +561,9 @@ var init_storage = __esm({
         return updatedUser || void 0;
       }
       async deleteUser(id) {
+        await db.update(logs).set({ userId: null }).where(eq2(logs.userId, id));
+        await db.update(voucherRecipients).set({ updatedBy: null }).where(eq2(voucherRecipients.updatedBy, id));
+        await db.update(supportVouchers).set({ createdBy: 1 }).where(eq2(supportVouchers.createdBy, id));
         const result = await db.delete(users).where(eq2(users.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
@@ -566,6 +574,9 @@ var init_storage = __esm({
         return await db.select().from(users).where(isNull(users.deletedAt));
       }
       async softDeleteUser(id) {
+        await db.update(logs).set({ userId: null }).where(eq2(logs.userId, id));
+        await db.update(voucherRecipients).set({ updatedBy: null }).where(eq2(voucherRecipients.updatedBy, id));
+        await db.update(supportVouchers).set({ createdBy: 1 }).where(eq2(supportVouchers.createdBy, id));
         const [user] = await db.update(users).set({ deletedAt: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).returning();
         return !!user;
       }
@@ -622,8 +633,10 @@ var init_storage = __esm({
       }
       async deleteFamily(id) {
         await db.delete(members).where(eq2(members.familyId, id));
+        await db.delete(orphans).where(eq2(orphans.familyId, id));
         await db.delete(requests).where(eq2(requests.familyId, id));
         await db.delete(documents).where(eq2(documents.familyId, id));
+        await db.delete(voucherRecipients).where(eq2(voucherRecipients.familyId, id));
         const result = await db.delete(families2).where(eq2(families2.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
@@ -734,7 +747,7 @@ var init_storage = __esm({
         const result = await db.select({ count: sql`count(*)` }).from(orphans).where(
           and(
             eq2(orphans.familyId, familyId),
-            sql`(${orphans.orphanBirthDate} > (CURRENT_DATE - INTERVAL '18 years'))`
+            sql`(CAST(${orphans.orphanBirthDate} AS DATE) > (CURRENT_DATE - INTERVAL '18 years'))`
           )
         );
         return result[0]?.count || 0;
@@ -817,6 +830,8 @@ var init_storage = __esm({
         if (filter.type) query = query.where(eq2(logs.type, filter.type));
         if (filter.userId) query = query.where(eq2(logs.userId, filter.userId));
         if (filter.search) query = query.where(sql`${logs.message} ILIKE '%' || ${filter.search} || '%'`);
+        if (filter.startDate) query = query.where(sql`${logs.createdAt} >= ${filter.startDate}`);
+        if (filter.endDate) query = query.where(sql`${logs.createdAt} <= ${filter.endDate}`);
         if (filter.limit) query = query.limit(filter.limit);
         if (filter.offset) query = query.offset(filter.offset);
         return await query.orderBy(desc(logs.createdAt));
@@ -981,6 +996,14 @@ var init_storage = __esm({
       }
       async clearUsers() {
         await db.delete(users);
+      }
+      async clearHeads() {
+        const headUsers = await db.select({ id: users.id, username: users.username }).from(users).where(eq2(users.role, "head"));
+        const headUserIds = headUsers.map((user) => user.id);
+        if (headUserIds.length > 0) {
+          await db.delete(families2).where(inArray(families2.userId, headUserIds));
+          await db.delete(users).where(inArray(users.id, headUserIds));
+        }
       }
       async clearWives() {
         const result = await db.update(families2).set({
@@ -1162,6 +1185,15 @@ async function loginHandler(req, res) {
         failedLoginAttempts: newFailedAttempts,
         lockoutUntil
       });
+      try {
+        await storage.createLog({
+          type: "failed_login",
+          message: `\u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u0633\u062C\u064A\u0644 \u062F\u062E\u0648\u0644 \u0641\u0627\u0634\u0644\u0629 \u0644\u0645\u0633\u062A\u062E\u062F\u0645 ${user.username} (${user.role})`,
+          userId: user.id
+        });
+      } catch (logError) {
+        console.error("Error logging failed login event:", logError);
+      }
       if (lockoutUntil) {
         return res.status(423).json({ message: `\u062A\u0645 \u062D\u0638\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 \u0644\u0645\u062F\u0629 ${lockoutDuration} \u062F\u0642\u064A\u0642\u0629 \u0628\u0633\u0628\u0628 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0641\u0627\u0634\u0644\u0629 \u0627\u0644\u0645\u062A\u0643\u0631\u0631\u0629` });
       } else {
@@ -1174,6 +1206,15 @@ async function loginHandler(req, res) {
       lockoutUntil: null
     });
     const token = generateToken(user);
+    try {
+      await storage.createLog({
+        type: "login",
+        message: `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0644\u0645\u0633\u062A\u062E\u062F\u0645 ${user.username} (${user.role})`,
+        userId: user.id
+      });
+    } catch (logError) {
+      console.error("Error logging login event:", logError);
+    }
     res.status(200).json({ token, user });
   } catch (error) {
     console.error("Login error:", error);
@@ -1202,6 +1243,191 @@ var init_jwt_auth = __esm({
     "use strict";
     init_storage();
     init_auth();
+  }
+});
+
+// src/services/bulk-import.service.ts
+var bulk_import_service_exports = {};
+__export(bulk_import_service_exports, {
+  BulkImportService: () => BulkImportService
+});
+var BulkImportService;
+var init_bulk_import_service = __esm({
+  "src/services/bulk-import.service.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    init_auth();
+    BulkImportService = class {
+      /**
+       * Performs a bulk insert of family data with associated user creation
+       */
+      static async bulkInsertFamilies(familiesData, chunkSize = 50) {
+        const results = [];
+        for (let i = 0; i < familiesData.length; i += chunkSize) {
+          const chunk = familiesData.slice(i, i + chunkSize);
+          const processedChunk = await Promise.all(chunk.map(async (family) => {
+            const hashedPassword = await hashPassword(family.husbandID);
+            return {
+              ...family,
+              hashedPassword
+            };
+          }));
+          const result = await db.transaction(async (tx) => {
+            const userResults = await tx.insert(users).values(
+              processedChunk.map((family) => ({
+                username: family.husbandID,
+                password: family.hashedPassword,
+                // Use the pre-hashed password
+                role: "head",
+                gender: family.headGender || family.gender || "male",
+                phone: family.primaryPhone || null
+              }))
+            ).returning({ id: users.id, username: users.username });
+            const familyResults = await tx.insert(families2).values(
+              processedChunk.map((family, index2) => ({
+                userId: userResults[index2].id,
+                husbandName: family.husbandName,
+                husbandID: family.husbandID,
+                husbandBirthDate: family.husbandBirthDate || null,
+                husbandJob: family.husbandJob || null,
+                hasDisability: family.hasDisability || false,
+                disabilityType: family.disabilityType || null,
+                hasChronicIllness: family.hasChronicIllness || false,
+                chronicIllnessType: family.chronicIllnessType || null,
+                wifeName: family.wifeName || null,
+                wifeID: family.wifeID || null,
+                wifeBirthDate: family.wifeBirthDate || null,
+                wifeJob: family.wifeJob || null,
+                wifePregnant: family.wifePregnant || false,
+                wifeHasDisability: family.wifeHasDisability || false,
+                wifeDisabilityType: family.wifeDisabilityType || null,
+                wifeHasChronicIllness: family.wifeHasChronicIllness || false,
+                wifeChronicIllnessType: family.wifeChronicIllnessType || null,
+                primaryPhone: family.primaryPhone || null,
+                secondaryPhone: family.secondaryPhone || null,
+                originalResidence: family.originalResidence || null,
+                currentHousing: family.currentHousing || null,
+                isDisplaced: family.isDisplaced || false,
+                displacedLocation: family.displacedLocation || null,
+                isAbroad: family.isAbroad || false,
+                warDamage2023: family.warDamage2023 || false,
+                warDamageDescription: family.warDamageDescription || null,
+                branch: family.branch || null,
+                landmarkNear: family.landmarkNear || null,
+                totalMembers: family.totalMembers || 0,
+                numMales: family.numMales || 0,
+                numFemales: family.numFemales || 0,
+                socialStatus: family.socialStatus || null,
+                adminNotes: family.adminNotes || null
+              }))
+            ).execute();
+            return { userResults, familyResults };
+          });
+          results.push(result);
+        }
+        return results;
+      }
+      /**
+       * Validates family data before import
+       */
+      static validateFamilyData(familiesData) {
+        const valid = [];
+        const errors = [];
+        for (let i = 0; i < familiesData.length; i++) {
+          const item = familiesData[i];
+          const rowIndex = i + 2;
+          const validationErrors = [];
+          if (!item.husbandName) {
+            validationErrors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0627\u0633\u0645 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629 \u0645\u0637\u0644\u0648\u0628`);
+          }
+          if (!item.husbandID) {
+            validationErrors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0645\u0637\u0644\u0648\u0628`);
+          } else {
+            const husbandID = String(item.husbandID);
+            if (!/^\d{9}$/.test(husbandID)) {
+              validationErrors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
+            }
+          }
+          if (item.wifeID && !/^\d{9}$/.test(String(item.wifeID))) {
+            validationErrors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0632\u0648\u062C\u0629 ${item.wifeID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
+          }
+          if (validationErrors.length > 0) {
+            errors.push(...validationErrors);
+          } else {
+            valid.push({
+              husbandName: String(item.husbandName || ""),
+              husbandID: String(item.husbandID),
+              husbandBirthDate: item.husbandBirthDate || null,
+              husbandJob: item.husbandJob || null,
+              hasDisability: Boolean(item.hasDisability) || false,
+              disabilityType: item.disabilityType || null,
+              hasChronicIllness: Boolean(item.hasChronicIllness) || false,
+              chronicIllnessType: item.chronicIllnessType || null,
+              wifeName: item.wifeName || null,
+              wifeID: item.wifeID || null,
+              wifeBirthDate: item.wifeBirthDate || null,
+              wifeJob: item.wifeJob || null,
+              wifePregnant: Boolean(item.wifePregnant) || false,
+              wifeHasDisability: Boolean(item.wifeHasDisability) || false,
+              wifeDisabilityType: item.wifeDisabilityType || null,
+              wifeHasChronicIllness: Boolean(item.wifeHasChronicIllness) || false,
+              wifeChronicIllnessType: item.wifeChronicIllnessType || null,
+              primaryPhone: item.primaryPhone || null,
+              secondaryPhone: item.secondaryPhone || null,
+              originalResidence: item.originalResidence || null,
+              currentHousing: item.currentHousing || null,
+              isDisplaced: Boolean(item.isDisplaced) || false,
+              displacedLocation: item.displacedLocation || null,
+              isAbroad: Boolean(item.isAbroad) || false,
+              warDamage2023: Boolean(item.warDamage2023) || false,
+              warDamageDescription: item.warDamageDescription || null,
+              branch: item.branch || null,
+              landmarkNear: item.landmarkNear || null,
+              totalMembers: parseInt(String(item.totalMembers)) || 0,
+              numMales: parseInt(String(item.numMales)) || 0,
+              numFemales: parseInt(String(item.numFemales)) || 0,
+              socialStatus: item.socialStatus || null,
+              adminNotes: item.adminNotes || null,
+              gender: item.gender || "male",
+              headGender: item.headGender || "male"
+            });
+          }
+        }
+        return { valid, errors };
+      }
+      /**
+       * Checks for duplicate IDs in the batch
+       */
+      static checkForDuplicates(familiesData) {
+        const ids = /* @__PURE__ */ new Set();
+        const duplicates = [];
+        for (const family of familiesData) {
+          if (family.husbandID) {
+            if (ids.has(family.husbandID)) {
+              duplicates.push(family.husbandID);
+            } else {
+              ids.add(family.husbandID);
+            }
+          }
+        }
+        return duplicates;
+      }
+      /**
+       * Performs a fast import by bypassing individual validations (for trusted data)
+       */
+      static async fastBulkImport(familiesData) {
+        const { valid, errors } = this.validateFamilyData(familiesData);
+        if (errors.length > 0) {
+          throw new Error(`Validation failed: ${errors.join(", ")}`);
+        }
+        const duplicates = this.checkForDuplicates(valid);
+        if (duplicates.length > 0) {
+          throw new Error(`Duplicate IDs found: ${duplicates.join(", ")}`);
+        }
+        return await this.bulkInsertFamilies(valid);
+      }
+    };
   }
 });
 
@@ -1242,6 +1468,7 @@ var require_package = __commonJS({
         jsonwebtoken: "^9.0.2",
         multer: "^1.4.5-lts.1",
         nanoid: "^5.1.5",
+        pg: "^8.16.3",
         "serverless-http": "^3.2.0",
         ws: "^8.18.0",
         xlsx: "^0.18.5",
@@ -1255,6 +1482,7 @@ var require_package = __commonJS({
         "@types/multer": "^1.4.12",
         "@types/node": "^20.16.11",
         "@types/ws": "^8.5.13",
+        "cross-env": "^10.1.0",
         tsx: "^4.19.1",
         typescript: "5.6.3"
       },
@@ -1411,21 +1639,21 @@ function registerRoutes(app2) {
       });
     }
   });
-  app2.post("/api/admin/import-heads", authMiddleware, upload.single("excel"), async (req, res) => {
+  app2.post("/api/admin/import-heads/init", authMiddleware, upload.single("excel"), async (req, res) => {
     if (!["admin", "root"].includes(req.user.role)) {
       console.log(`\u274C Unauthorized import attempt by user: ${req.user?.username || "anonymous"}`);
       return res.sendStatus(403);
     }
-    console.log(`\u{1F4CA} Excel import started by user: ${req.user.username}`);
     try {
       if (!req.file) {
         console.log("\u274C No file uploaded");
         return res.status(400).json({ message: "\u064A\u0631\u062C\u0649 \u0631\u0641\u0639 \u0645\u0644\u0641 Excel" });
       }
+      console.log(`\u{1F4CA} Initializing import session for user: ${req.user.username}`);
       console.log(`\u{1F4C1} File uploaded: ${req.file.originalname}, Size: ${req.file.size} bytes`);
-      if (req.file.size > 10 * 1024 * 1024) {
+      if (req.file.size > 20 * 1024 * 1024) {
         console.log(`\u274C File too large: ${req.file.size} bytes`);
-        return res.status(400).json({ message: "\u062D\u062C\u0645 \u0627\u0644\u0645\u0644\u0641 \u0643\u0628\u064A\u0631 \u062C\u062F\u0627\u064B. \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 10 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A" });
+        return res.status(400).json({ message: "\u062D\u062C\u0645 \u0627\u0644\u0645\u0644\u0641 \u0643\u0628\u064A\u0631 \u062C\u062F\u0627\u064B. \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 20 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A" });
       }
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
@@ -1437,11 +1665,8 @@ function registerRoutes(app2) {
         return res.status(400).json({ message: "\u0645\u0644\u0641 Excel \u0641\u0627\u0631\u063A \u0623\u0648 \u0644\u0627 \u064A\u062D\u062A\u0648\u064A \u0639\u0644\u0649 \u0628\u064A\u0627\u0646\u0627\u062A" });
       }
       console.log(`\u{1F4CA} Found ${data.length} rows to process`);
-      let successCount = 0;
-      let errorCount = 0;
+      const transformedData = [];
       const errors = [];
-      console.log(`\u{1F4CA} Starting validation phase for ${data.length} rows...`);
-      const validRows = [];
       const allHusbandIDs = /* @__PURE__ */ new Set();
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
@@ -1449,132 +1674,218 @@ function registerRoutes(app2) {
         try {
           if (!row.husbandName || !row.husbandID) {
             errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0627\u0633\u0645 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629 \u0648\u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0645\u0637\u0644\u0648\u0628\u0627\u0646`);
-            errorCount++;
             continue;
           }
           const husbandID = String(row.husbandID);
           if (!/^\d{9}$/.test(husbandID)) {
             errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
-            errorCount++;
+            continue;
+          }
+          if (row.wifeID && !/^\d{9}$/.test(String(row.wifeID))) {
+            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0632\u0648\u062C\u0629 ${row.wifeID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
             continue;
           }
           if (allHusbandIDs.has(husbandID)) {
             errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u0645\u0643\u0631\u0631 \u0641\u064A \u0627\u0644\u0645\u0644\u0641`);
-            errorCount++;
             continue;
           }
           allHusbandIDs.add(husbandID);
-          validRows.push({ ...row, husbandID, rowIndex });
+          transformedData.push({
+            husbandName: String(row.husbandName || ""),
+            husbandID,
+            husbandBirthDate: row.husbandBirthDate || null,
+            husbandJob: row.husbandJob || null,
+            hasDisability: Boolean(row.hasDisability) || false,
+            disabilityType: row.disabilityType || null,
+            hasChronicIllness: Boolean(row.hasChronicIllness) || false,
+            chronicIllnessType: row.chronicIllnessType || null,
+            wifeName: row.wifeName || null,
+            wifeID: row.wifeID || null,
+            wifeBirthDate: row.wifeBirthDate || null,
+            wifeJob: row.wifeJob || null,
+            wifePregnant: Boolean(row.wifePregnant) || false,
+            wifeHasDisability: Boolean(row.wifeHasDisability) || false,
+            wifeDisabilityType: row.wifeDisabilityType || null,
+            wifeHasChronicIllness: Boolean(row.wifeHasChronicIllness) || false,
+            wifeChronicIllnessType: row.wifeChronicIllnessType || null,
+            primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
+            secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
+            originalResidence: row.originalResidence || null,
+            currentHousing: row.currentHousing || null,
+            isDisplaced: Boolean(row.isDisplaced) || false,
+            displacedLocation: row.displacedLocation || null,
+            isAbroad: Boolean(row.isAbroad) || false,
+            warDamage2023: Boolean(row.warDamage2023) || false,
+            warDamageDescription: row.warDamageDescription || null,
+            branch: row.branch || null,
+            landmarkNear: row.landmarkNear || null,
+            totalMembers: parseInt(String(row.totalMembers)) || 0,
+            numMales: parseInt(String(row.numMales)) || 0,
+            numFemales: parseInt(String(row.numFemales)) || 0,
+            socialStatus: row.socialStatus || null,
+            adminNotes: row.adminNotes || null,
+            gender: row.gender || "male",
+            headGender: row.headGender || "male"
+          });
         } catch (error) {
-          console.error(`\u274C Error validating row ${rowIndex}:`, error.message);
+          console.error(`\u274C Error processing row ${rowIndex}:`, error.message);
           errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: ${error.message}`);
-          errorCount++;
         }
       }
-      console.log(`\u{1F4CA} Validation complete: ${validRows.length} valid, ${errorCount} errors`);
-      console.log(`\u{1F4CA} Checking for existing users...`);
-      const existingFamilies = await storage.getAllFamilies();
-      const existingHusbandIDs = new Set(existingFamilies.map((f) => f.husbandID));
-      const finalValidRows = validRows.filter((row) => {
-        if (existingHusbandIDs.has(row.husbandID)) {
-          errors.push(`\u0627\u0644\u0635\u0641 ${row.rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${row.husbandID} \u0645\u0633\u062C\u0644 \u0645\u0633\u0628\u0642\u0627\u064B`);
-          errorCount++;
-          return false;
-        }
-        return true;
-      });
-      console.log(`\u{1F4CA} Final validation: ${finalValidRows.length} rows to process`);
-      const BATCH_SIZE = 50;
-      const batches = [];
-      for (let i = 0; i < finalValidRows.length; i += BATCH_SIZE) {
-        batches.push(finalValidRows.slice(i, i + BATCH_SIZE));
+      if (errors.length > 0) {
+        return res.status(400).json({
+          message: "\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0623\u062E\u0637\u0627\u0621 \u0641\u064A \u0627\u0644\u0645\u0644\u0641",
+          errors: errors.slice(0, 20)
+          // Limit errors to first 20
+        });
       }
-      console.log(`\u{1F4CA} Processing ${batches.length} batches of ${BATCH_SIZE} rows each...`);
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        console.log(`\u{1F4CA} Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} rows)`);
-        try {
-          const batchPromises = batch.map(async (row) => {
-            try {
-              const user = await storage.createUser({
-                username: row.husbandID,
-                password: await hashPassword(row.husbandID),
-                role: "head",
-                gender: row.headGender || "male",
-                // Use gender from import data if available, default to 'male'
-                phone: row.primaryPhone ? String(row.primaryPhone) : null
-              });
-              const familyData = {
-                userId: user.id,
-                husbandName: row.husbandName,
-                husbandID: row.husbandID,
-                husbandBirthDate: row.husbandBirthDate || null,
-                husbandJob: row.husbandJob || null,
-                primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
-                secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
-                originalResidence: row.originalResidence || null,
-                currentHousing: row.currentHousing || null,
-                isDisplaced: Boolean(row.isDisplaced),
-                displacedLocation: row.displacedLocation || null,
-                isAbroad: Boolean(row.isAbroad),
-                warDamage2024: Boolean(row.warDamage2024),
-                warDamageDescription: row.warDamageDescription || null,
-                branch: row.branch || null,
-                landmarkNear: row.landmarkNear || null,
-                totalMembers: parseInt(String(row.totalMembers)) || 0,
-                numMales: parseInt(String(row.numMales)) || 0,
-                numFemales: parseInt(String(row.numFemales)) || 0,
-                socialStatus: row.socialStatus || null,
-                adminNotes: row.adminNotes || null
-              };
-              await storage.createFamily(familyData);
-              return { success: true, rowIndex: row.rowIndex };
-            } catch (error) {
-              console.error(`\u274C Error processing row ${row.rowIndex}:`, error.message);
-              return { success: false, rowIndex: row.rowIndex, error: error.message };
-            }
-          });
-          const batchResults = await Promise.all(batchPromises);
-          batchResults.forEach((result) => {
-            if (result.success) {
-              successCount++;
-            } else {
-              errors.push(`\u0627\u0644\u0635\u0641 ${result.rowIndex}: ${result.error}`);
-              errorCount++;
-            }
-          });
-          if (batchIndex < batches.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
-        } catch (batchError) {
-          console.error(`\u274C Batch ${batchIndex + 1} failed:`, batchError.message);
-          batch.forEach((row) => {
-            errors.push(`\u0627\u0644\u0635\u0641 ${row.rowIndex}: \u0641\u0634\u0644 \u0641\u064A \u0627\u0644\u0645\u0639\u0627\u0644\u062C\u0629 \u0627\u0644\u062C\u0645\u0627\u0639\u064A\u0629`);
-            errorCount++;
-          });
-        }
+      const sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const sessionData = {
+        sessionId,
+        userId: req.user.id,
+        totalRecords: transformedData.length,
+        uploadedAt: /* @__PURE__ */ new Date(),
+        originalFilename: req.file.originalname,
+        transformedData,
+        // Store the transformed data
+        processed: 0,
+        errors: []
+      };
+      if (!global.importSessions) {
+        global.importSessions = /* @__PURE__ */ new Map();
       }
-      const resultMessage = `\u062A\u0645 \u0627\u0633\u062A\u064A\u0631\u0627\u062F ${successCount} \u0639\u0627\u0626\u0644\u0629 \u0628\u0646\u062C\u0627\u062D\u060C \u0641\u0634\u0644 \u0641\u064A ${errorCount} \u0635\u0641`;
-      console.log(`\u2705 Import completed: ${resultMessage}`);
+      global.importSessions.set(sessionId, sessionData);
+      console.log(`\u2705 Import session initialized: ${sessionId} for ${transformedData.length} records`);
       res.json({
-        message: resultMessage,
-        successCount,
-        errorCount,
-        errors: errors.slice(0, 20)
-        // Limit errors to first 20 to avoid huge responses
+        sessionId,
+        totalRecords: transformedData.length,
+        message: `\u062A\u0645 \u062A\u0647\u064A\u0626\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F \u0644\u0640 ${transformedData.length} \u0633\u062C\u0644`
       });
     } catch (error) {
-      console.error("\u274C Excel import error:", error);
-      console.error("Stack trace:", error.stack);
-      let errorMessage = "\u062E\u0637\u0623 \u0641\u064A \u0627\u0633\u062A\u064A\u0631\u0627\u062F \u0645\u0644\u0641 Excel";
-      if (error.message.includes("Invalid file format")) {
-        errorMessage = "\u062A\u0646\u0633\u064A\u0642 \u0627\u0644\u0645\u0644\u0641 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D. \u064A\u0631\u062C\u0649 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0645\u0644\u0641 Excel (.xlsx \u0623\u0648 .xls)";
-      } else if (error.message.includes("Permission denied")) {
-        errorMessage = "\u0644\u064A\u0633 \u0644\u062F\u064A\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0644\u0647\u0630\u0647 \u0627\u0644\u0639\u0645\u0644\u064A\u0629";
-      } else {
-        errorMessage += ": " + error.message;
+      console.error("\u274C Error initializing import session:", error);
+      res.status(500).json({
+        message: "\u062E\u0637\u0623 \u0641\u064A \u062A\u0647\u064A\u0626\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F",
+        error: error.message
+      });
+    }
+  });
+  app2.post("/api/admin/import-heads/chunk", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) {
+      return res.sendStatus(403);
+    }
+    try {
+      const { sessionId, startIdx, chunkSize = 50 } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
       }
-      res.status(500).json({ message: errorMessage });
+      if (!global.importSessions) {
+        global.importSessions = /* @__PURE__ */ new Map();
+      }
+      const session = global.importSessions.get(sessionId);
+      if (!session) {
+        return res.status(400).json({ message: "Invalid session ID" });
+      }
+      const startIndex = startIdx || session.processed || 0;
+      const endIndex = Math.min(startIndex + chunkSize, session.transformedData.length);
+      const chunk = session.transformedData.slice(startIndex, endIndex);
+      if (chunk.length === 0) {
+        const progress2 = 100;
+        const processed = session.totalRecords;
+        res.json({
+          success: true,
+          processed,
+          total: session.totalRecords,
+          progress: progress2,
+          sessionId,
+          message: `\u0627\u0643\u062A\u0645\u0644 \u0627\u0633\u062A\u064A\u0631\u0627\u062F ${processed} \u0633\u062C\u0644`,
+          done: true
+        });
+        return;
+      }
+      console.log(`\u{1F4CA} Processing chunk for session ${sessionId}: ${chunk.length} records, start: ${startIndex}, end: ${endIndex}`);
+      const { BulkImportService: BulkImportService2 } = await Promise.resolve().then(() => (init_bulk_import_service(), bulk_import_service_exports));
+      const result = await BulkImportService2.fastBulkImport(chunk);
+      session.processed = endIndex;
+      const progress = Math.round(session.processed / session.totalRecords * 100);
+      console.log(`\u2705 Chunk processed: ${session.processed}/${session.totalRecords} (${progress}%)`);
+      res.json({
+        success: true,
+        processed: session.processed,
+        total: session.totalRecords,
+        progress,
+        sessionId,
+        message: `\u062A\u0645\u062A \u0645\u0639\u0627\u0644\u062C\u0629 ${session.processed}/${session.totalRecords} \u0633\u062C\u0644`,
+        done: session.processed >= session.totalRecords
+      });
+    } catch (error) {
+      console.error("\u274C Error processing import chunk:", error);
+      res.status(500).json({
+        message: "\u062E\u0637\u0623 \u0641\u064A \u0645\u0639\u0627\u0644\u062C\u0629 \u062C\u0632\u0621 \u0645\u0646 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A",
+        error: error.message
+      });
+    }
+  });
+  app2.get("/api/admin/import-heads/status/:sessionId", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) {
+      return res.sendStatus(403);
+    }
+    try {
+      const { sessionId } = req.params;
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+      if (!global.importSessions) {
+        global.importSessions = /* @__PURE__ */ new Map();
+      }
+      const session = global.importSessions.get(sessionId);
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      const progress = session.totalRecords > 0 ? Math.round(session.processed / session.totalRecords * 100) : 0;
+      res.json({
+        sessionId: session.sessionId,
+        processed: session.processed,
+        total: session.totalRecords,
+        progress,
+        status: session.processed >= session.totalRecords ? "completed" : "in-progress",
+        message: `\u0645\u0633\u062A\u0648\u0649 \u0627\u0644\u062A\u0642\u062F\u0645 ${progress}%`
+      });
+    } catch (error) {
+      console.error("\u274C Error getting import status:", error);
+      res.status(500).json({
+        message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062D\u0635\u0648\u0644 \u0639\u0644\u0649 \u062D\u0627\u0644\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F",
+        error: error.message
+      });
+    }
+  });
+  app2.post("/api/admin/import-heads/finalize", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) {
+      return res.sendStatus(403);
+    }
+    try {
+      const { sessionId } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+      if (!global.importSessions) {
+        global.importSessions = /* @__PURE__ */ new Map();
+      }
+      const session = global.importSessions.get(sessionId);
+      if (!session) {
+        return res.status(400).json({ message: "Invalid session ID" });
+      }
+      global.importSessions.delete(sessionId);
+      console.log(`\u2705 Import session ${sessionId} finalized`);
+      res.json({
+        success: true,
+        message: `\u062A\u0645 \u0627\u0644\u0627\u0646\u062A\u0647\u0627\u0621 \u0645\u0646 \u0627\u0633\u062A\u064A\u0631\u0627\u062F ${session.processed} \u0633\u062C\u0644 \u0628\u0646\u062C\u0627\u062D`
+      });
+    } catch (error) {
+      console.error("\u274C Error finalizing import session:", error);
+      res.status(500).json({
+        message: "\u062E\u0637\u0623 \u0641\u064A \u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F",
+        error: error.message
+      });
     }
   });
   app2.get("/api/family", authMiddleware, async (req, res) => {
@@ -1595,6 +1906,11 @@ function registerRoutes(app2) {
       const familyData = insertFamilySchema.parse(req.body);
       familyData.userId = req.user.id;
       const family = await storage.createFamily(familyData);
+      await storage.createLog({
+        type: "family_creation",
+        message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0639\u0627\u0626\u0644\u0629 \u062C\u062F\u064A\u062F\u0629 ${family.husbandName} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.status(201).json(family);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -1615,6 +1931,11 @@ function registerRoutes(app2) {
       }
       const family = await storage.updateFamily(id, familyData);
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      await storage.createLog({
+        type: "family_update",
+        message: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0639\u0627\u0626\u0644\u0629 ${family.husbandName} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.json(family);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -1648,6 +1969,12 @@ function registerRoutes(app2) {
         const parsedData = memberDataSchema.parse(req.body);
         const memberData = { ...parsedData, familyId: family.id };
         const member = await storage.createMember(memberData);
+        const memberFamily = await storage.getFamily(member.familyId);
+        await storage.createLog({
+          type: "member_creation",
+          message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0641\u0631\u062F \u062C\u062F\u064A\u062F ${member.fullName} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${memberFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+          userId: req.user.id
+        });
         res.status(201).json(member);
       } else {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
@@ -1672,6 +1999,12 @@ function registerRoutes(app2) {
       }
       const updatedMember = await storage.updateMember(id, memberData);
       if (!updatedMember) return res.status(404).json({ message: "\u0627\u0644\u0641\u0631\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      const memberFamily = await storage.getFamily(updatedMember.familyId);
+      await storage.createLog({
+        type: "member_update",
+        message: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0641\u0631\u062F ${updatedMember.fullName} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${memberFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.json(updatedMember);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -1704,12 +2037,25 @@ function registerRoutes(app2) {
           console.log("Server: Delete failed for ID:", id);
           return res.status(404).json({ message: "\u0627\u0644\u0641\u0631\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
         }
+        const memberFamily = await storage.getFamily(member.familyId);
+        await storage.createLog({
+          type: "member_deletion",
+          message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u0641\u0631\u062F ${member.fullName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${memberFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+          userId: req.user.id
+        });
         res.sendStatus(204);
       } else {
+        const member = await storage.getMember(id);
         const success = await storage.deleteMember(id);
         if (!success) {
           return res.status(404).json({ message: "\u0627\u0644\u0641\u0631\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
         }
+        const memberFamily = await storage.getFamily(member.familyId);
+        await storage.createLog({
+          type: "admin_member_deletion",
+          message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u0641\u0631\u062F ${member?.fullName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${memberFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+          userId: req.user.id
+        });
         res.sendStatus(204);
       }
     } catch (error) {
@@ -1731,6 +2077,19 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
+  app2.post("/api/orphans/upload", authMiddleware, upload.single("image"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "\u0644\u0645 \u064A\u062A\u0645 \u062A\u062D\u0645\u064A\u0644 \u0623\u064A \u0635\u0648\u0631\u0629" });
+      }
+      const imageBuffer = req.file.buffer;
+      const imageBase64 = `data:${req.file.mimetype};base64,${imageBuffer.toString("base64")}`;
+      res.json({ image: imageBase64 });
+    } catch (error) {
+      console.error("Image upload error:", error);
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0635\u0648\u0631\u0629" });
+    }
+  });
   app2.post("/api/orphans", authMiddleware, async (req, res) => {
     try {
       const family = await storage.getFamilyByUserId(req.user.id);
@@ -1740,8 +2099,14 @@ function registerRoutes(app2) {
       if (isHeadOrDualRole(req.user, family)) {
         const orphanDataSchema = insertOrphanSchema.omit({ familyId: true });
         const parsedData = orphanDataSchema.parse(req.body);
-        const orphanData = { ...parsedData, familyId: family.id };
+        const orphanData = { ...parsedData, familyId: family2.id };
         const orphan = await storage.createOrphan(orphanData);
+        const family2 = await storage.getFamily(orphan.familyId);
+        await storage.createLog({
+          type: "orphan_creation",
+          message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u064A\u062A\u064A\u0645 \u062C\u062F\u064A\u062F ${orphan.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${family2?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+          userId: req.user.id
+        });
         res.status(201).json(orphan);
       } else {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
@@ -1773,6 +2138,12 @@ function registerRoutes(app2) {
       }
       const updatedOrphan = await storage.updateOrphan(id, orphanData);
       if (!updatedOrphan) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      const familyForLogging = await storage.getFamily(updatedOrphan.familyId);
+      await storage.createLog({
+        type: "orphan_update",
+        message: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u064A\u062A\u064A\u0645 ${updatedOrphan.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${familyForLogging?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.json(updatedOrphan);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -1805,12 +2176,25 @@ function registerRoutes(app2) {
           console.log("Server: Delete failed for ID:", id);
           return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
         }
+        const orphanFamily = await storage.getFamily(orphan.familyId);
+        await storage.createLog({
+          type: "orphan_deletion",
+          message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u064A\u062A\u064A\u0645 ${orphan.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${orphanFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+          userId: req.user.id
+        });
         res.sendStatus(204);
       } else {
+        const orphan = await storage.getOrphan(id);
         const success = await storage.deleteOrphan(id);
         if (!success) {
           return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
         }
+        const orphanFamily = await storage.getFamily(orphan.familyId);
+        await storage.createLog({
+          type: "admin_orphan_deletion",
+          message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u064A\u062A\u064A\u0645 ${orphan?.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${orphanFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+          userId: req.user.id
+        });
         res.sendStatus(204);
       }
     } catch (error) {
@@ -1889,6 +2273,11 @@ function registerRoutes(app2) {
       if (!updatedFamily) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F/\u0629" });
       const user = await storage.getUser(family.userId);
       const spouseData = getSpouseDataWithGenderLabel(updatedFamily, user?.gender || null);
+      await storage.createLog({
+        type: "spouse_update",
+        message: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u0644\u0639\u0627\u0626\u0644\u0629 ${updatedFamily.husbandName} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.json(spouseData);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2075,6 +2464,11 @@ function registerRoutes(app2) {
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       const updatedFamily = await storage.updateFamily(id, familyData);
       if (!updatedFamily) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      await storage.createLog({
+        type: "admin_family_update",
+        message: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0639\u0627\u0626\u0644\u0629 ${updatedFamily.husbandName} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.json(updatedFamily);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2087,8 +2481,14 @@ function registerRoutes(app2) {
     if (req.user.role === "head") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
+      const family = await storage.getFamily(id);
       const success = await storage.deleteFamily(id);
       if (!success) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      await storage.createLog({
+        type: "family_deletion",
+        message: `\u062A\u0645 \u062D\u0630\u0641 \u0639\u0627\u0626\u0644\u0629 ${id} (\u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629: ${family?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"}) \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.sendStatus(204);
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
@@ -2132,6 +2532,12 @@ function registerRoutes(app2) {
     try {
       const orphanData = insertOrphanSchema.parse(req.body);
       const orphan = await storage.createOrphan(orphanData);
+      const family = await storage.getFamily(orphan.familyId);
+      await storage.createLog({
+        type: "admin_orphan_creation",
+        message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u064A\u062A\u064A\u0645 \u062C\u062F\u064A\u062F \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${family?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.status(201).json(orphan);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2147,6 +2553,12 @@ function registerRoutes(app2) {
       const orphanData = insertOrphanSchema.partial().parse(req.body);
       const orphan = await storage.updateOrphan(id, orphanData);
       if (!orphan) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      const family = await storage.getFamily(orphan.familyId);
+      await storage.createLog({
+        type: "admin_orphan_update",
+        message: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u064A\u062A\u064A\u0645 ${orphan.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${family?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.json(orphan);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2155,12 +2567,32 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
+  app2.post("/api/admin/orphans/upload", authMiddleware, upload.single("image"), async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "\u0644\u0645 \u064A\u062A\u0645 \u062A\u062D\u0645\u064A\u0644 \u0623\u064A \u0635\u0648\u0631\u0629" });
+      }
+      const imageBuffer = req.file.buffer;
+      const imageBase64 = `data:${req.file.mimetype};base64,${imageBuffer.toString("base64")}`;
+      res.json({ image: imageBase64 });
+    } catch (error) {
+      console.error("Image upload error:", error);
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0635\u0648\u0631\u0629" });
+    }
+  });
   app2.delete("/api/admin/orphans/:id", authMiddleware, async (req, res) => {
     if (req.user.role === "head") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
+      const orphan = await storage.getOrphan(id);
       const success = await storage.deleteOrphan(id);
       if (!success) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      await storage.createLog({
+        type: "admin_orphan_deletion",
+        message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u064A\u062A\u064A\u0645 ${orphan?.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} (ID: ${orphan?.id}) \u0641\u064A \u0627\u0644\u0639\u0627\u0626\u0644\u0629 ${orphan?.familyId} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.sendStatus(204);
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
@@ -2174,6 +2606,12 @@ function registerRoutes(app2) {
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       const memberData = { ...insertMemberSchema.omit({ familyId: true }).parse(req.body), familyId };
       const member = await storage.createMember(memberData);
+      const memberFamily = await storage.getFamily(member.familyId);
+      await storage.createLog({
+        type: "admin_member_creation",
+        message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0641\u0631\u062F \u062C\u062F\u064A\u062F ${member.fullName} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${memberFamily?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u0645\u0634\u0631\u0641 ${req.user.username}`,
+        userId: req.user.id
+      });
       res.status(201).json(member);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2432,6 +2870,19 @@ function registerRoutes(app2) {
       return res.sendStatus(403);
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.delete("/api/admin/heads", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
+    try {
+      if (req.user.role === "admin" && !req.user.isProtected) {
+        return res.status(403).json({ message: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u0644\u0644\u0645\u0634\u0631\u0641 \u063A\u064A\u0631 \u0627\u0644\u0645\u062D\u0645\u064A \u062D\u0630\u0641 \u0643\u0644 \u0631\u0624\u0648\u0633 \u0627\u0644\u0639\u0627\u0626\u0644\u0627\u062A" });
+      }
+      await storage.clearHeads();
+      res.json({ message: "\u062A\u0645 \u062D\u0630\u0641 \u062C\u0645\u064A\u0639 \u0631\u0624\u0648\u0633 \u0627\u0644\u0639\u0627\u0626\u0644\u0627\u062A \u0628\u0646\u062C\u0627\u062D" });
+    } catch (error) {
+      console.error("Error deleting all heads:", error);
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062D\u0630\u0641 \u0627\u0644\u062C\u0645\u0627\u0639\u064A \u0644\u0631\u0624\u0648\u0633 \u0627\u0644\u0639\u0627\u0626\u0644\u0627\u062A" });
     }
   });
   app2.post("/api/admin/users/:id/reset-lockout", authMiddleware, async (req, res) => {

@@ -164,36 +164,33 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Excel import route for bulk importing head users
-  app.post("/api/admin/import-heads", authMiddleware, upload.single("excel"), async (req, res) => {
+  // Initialize import session - returns session ID and total records
+  app.post("/api/admin/import-heads/init", authMiddleware, upload.single("excel"), async (req, res) => {
     if (!['admin', 'root'].includes(req.user!.role)) {
       console.log(`❌ Unauthorized import attempt by user: ${req.user?.username || 'anonymous'}`);
       return res.sendStatus(403);
     }
-    
-    // Note: Netlify Functions have built-in 10-minute timeout
-    
-    console.log(`📊 Excel import started by user: ${req.user!.username}`);
-    
+
     try {
       if (!req.file) {
         console.log('❌ No file uploaded');
         return res.status(400).json({ message: "يرجى رفع ملف Excel" });
       }
 
+      console.log(`📊 Initializing import session for user: ${req.user!.username}`);
       console.log(`📁 File uploaded: ${req.file.originalname}, Size: ${req.file.size} bytes`);
 
-      // Validate file size (max 10MB)
-      if (req.file.size > 10 * 1024 * 1024) {
+      // Validate file size (max 20MB for import sessions)
+      if (req.file.size > 20 * 1024 * 1024) {
         console.log(`❌ File too large: ${req.file.size} bytes`);
-        return res.status(400).json({ message: "حجم الملف كبير جداً. الحد الأقصى 10 ميجابايت" });
+        return res.status(400).json({ message: "حجم الملف كبير جداً. الحد الأقصى 20 ميجابايت" });
       }
 
-      // Parse Excel file
+      // Parse Excel file to get total count
       const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       console.log(`📋 Processing sheet: ${sheetName}`);
-      
+
       const worksheet = workbook.Sheets[sheetName];
       const data = XLSX.utils.sheet_to_json(worksheet);
 
@@ -204,18 +201,11 @@ export function registerRoutes(app: Express): Server {
 
       console.log(`📊 Found ${data.length} rows to process`);
 
-      let successCount = 0;
-      let errorCount = 0;
+      // Transform the Excel data to match our schema (similar to original validation)
+      const transformedData = [];
       const errors: string[] = [];
-
-      // OPTIMIZATION: Batch processing instead of sequential
-      console.log(`📊 Starting validation phase for ${data.length} rows...`);
-      
-      // Phase 1: Validate all data and get existing users in bulk
-      const validRows: any[] = [];
       const allHusbandIDs = new Set<string>();
-      
-      // Pre-validate all rows first
+
       for (let i = 0; i < data.length; i++) {
         const row: any = data[i];
         const rowIndex = i + 2;
@@ -224,7 +214,6 @@ export function registerRoutes(app: Express): Server {
           // Validate required fields
           if (!row.husbandName || !row.husbandID) {
             errors.push(`الصف ${rowIndex}: اسم رب الأسرة ورقم الهوية مطلوبان`);
-            errorCount++;
             continue;
           }
 
@@ -234,233 +223,275 @@ export function registerRoutes(app: Express): Server {
           // Validate ID format (9 digits)
           if (!/^\d{9}$/.test(husbandID)) {
             errors.push(`الصف ${rowIndex}: رقم الهوية ${husbandID} يجب أن يكون 9 أرقام`);
-            errorCount++;
             continue;
           }
 
           // Validate wife ID if provided
           if (row.wifeID && !/^\d{9}$/.test(String(row.wifeID))) {
             errors.push(`الصف ${rowIndex}: رقم هوية الزوجة ${row.wifeID} يجب أن يكون 9 أرقام`);
-            errorCount++;
             continue;
-          }
-
-          // Validate wife birth date if provided (format: YYYY-MM-DD or DD/MM/YYYY)
-          if (row.wifeBirthDate && typeof row.wifeBirthDate === 'string') {
-            // Check if it matches common date formats
-            const dateRegex = /^\d{4}-\d{2}-\d{2}$|^\d{1,2}\/\d{1,2}\/\d{4}$/;
-            if (!dateRegex.test(row.wifeBirthDate)) {
-              errors.push(`الصف ${rowIndex}: تنسيق تاريخ ميلاد الزوجة ${row.wifeBirthDate} غير صحيح`);
-              errorCount++;
-              continue;
-            }
           }
 
           // Check for duplicates within the file
           if (allHusbandIDs.has(husbandID)) {
             errors.push(`الصف ${rowIndex}: رقم الهوية ${husbandID} مكرر في الملف`);
-            errorCount++;
             continue;
           }
 
           allHusbandIDs.add(husbandID);
-          validRows.push({ ...row, husbandID, rowIndex });
+
+          // Transform the data to match our schema
+          transformedData.push({
+            husbandName: String(row.husbandName || ''),
+            husbandID: husbandID,
+            husbandBirthDate: row.husbandBirthDate || null,
+            husbandJob: row.husbandJob || null,
+            hasDisability: Boolean(row.hasDisability) || false,
+            disabilityType: row.disabilityType || null,
+            hasChronicIllness: Boolean(row.hasChronicIllness) || false,
+            chronicIllnessType: row.chronicIllnessType || null,
+            wifeName: row.wifeName || null,
+            wifeID: row.wifeID || null,
+            wifeBirthDate: row.wifeBirthDate || null,
+            wifeJob: row.wifeJob || null,
+            wifePregnant: Boolean(row.wifePregnant) || false,
+            wifeHasDisability: Boolean(row.wifeHasDisability) || false,
+            wifeDisabilityType: row.wifeDisabilityType || null,
+            wifeHasChronicIllness: Boolean(row.wifeHasChronicIllness) || false,
+            wifeChronicIllnessType: row.wifeChronicIllnessType || null,
+            primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
+            secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
+            originalResidence: row.originalResidence || null,
+            currentHousing: row.currentHousing || null,
+            isDisplaced: Boolean(row.isDisplaced) || false,
+            displacedLocation: row.displacedLocation || null,
+            isAbroad: Boolean(row.isAbroad) || false,
+            warDamage2023: Boolean(row.warDamage2023) || false,
+            warDamageDescription: row.warDamageDescription || null,
+            branch: row.branch || null,
+            landmarkNear: row.landmarkNear || null,
+            totalMembers: parseInt(String(row.totalMembers)) || 0,
+            numMales: parseInt(String(row.numMales)) || 0,
+            numFemales: parseInt(String(row.numFemales)) || 0,
+            socialStatus: row.socialStatus || null,
+            adminNotes: row.adminNotes || null,
+            gender: row.gender || 'male',
+            headGender: row.headGender || 'male',
+          });
 
         } catch (error: any) {
-          console.error(`❌ Error validating row ${rowIndex}:`, error.message);
+          console.error(`❌ Error processing row ${rowIndex}:`, error.message);
           errors.push(`الصف ${rowIndex}: ${error.message}`);
-          errorCount++;
         }
       }
 
-      console.log(`📊 Validation complete: ${validRows.length} valid, ${errorCount} errors`);
-
-      // Phase 2: Check existing users and families in bulk (single query instead of N queries)
-      console.log(`📊 Checking for existing users...`);
-      const [existingFamilies, existingUsers] = await Promise.all([
-        storage.getAllFamilies(),
-        storage.getAllUsers()
-      ]);
-      const existingHusbandIDs = new Set(existingFamilies.map(f => f.husbandID));
-      const existingUsernames = new Set(existingUsers.map(u => u.username));
-
-      const finalValidRows = validRows.filter(row => {
-        // Check if user with this username already exists
-        if (existingUsernames.has(row.husbandID)) {
-          errors.push(`الصف ${row.rowIndex}: رقم الهوية ${row.husbandID} مسجل مسبقاً كمستخدم`);
-          errorCount++;
-          return false;
-        }
-        // Check if family with this husbandID already exists
-        if (existingHusbandIDs.has(row.husbandID)) {
-          errors.push(`الصف ${row.rowIndex}: رقم الهوية ${row.husbandID} مسجل مسبقاً`);
-          errorCount++;
-          return false;
-        }
-        return true;
-      });
-
-      console.log(`📊 Final validation: ${finalValidRows.length} rows to process`);
-
-      // Phase 3: Batch processing in chunks of 50
-      const BATCH_SIZE = 50;
-      const batches = [];
-      for (let i = 0; i < finalValidRows.length; i += BATCH_SIZE) {
-        batches.push(finalValidRows.slice(i, i + BATCH_SIZE));
+      if (errors.length > 0) {
+        return res.status(400).json({
+          message: "تم العثور على أخطاء في الملف",
+          errors: errors.slice(0, 20) // Limit errors to first 20
+        });
       }
 
-      console.log(`📊 Processing ${batches.length} batches of ${BATCH_SIZE} rows each...`);
+      // Generate a session ID for this import
+      const sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-      // Process each batch
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        console.log(`📊 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} rows)`);
+      // Store initial data in temporary storage (in memory or database)
+      // For a real implementation, use Redis or database for session data
+      const sessionData = {
+        sessionId,
+        userId: req.user!.id,
+        totalRecords: transformedData.length,
+        uploadedAt: new Date(),
+        originalFilename: req.file.originalname,
+        transformedData, // Store the transformed data
+        processed: 0,
+        errors: []
+      };
 
-        try {
-          // Process batch in parallel with controlled concurrency
-          const batchPromises = batch.map(async (row) => {
-            try {
-              // Check again if user already exists (race condition check)
-              const existingUser = await storage.getUserByUsername(row.husbandID);
-              if (existingUser) {
-                return { success: false, rowIndex: row.rowIndex, error: `رقم الهوية ${row.husbandID} مسجل مسبقاً كمستخدم` };
-              }
-
-              // Create user - handle possible duplicate constraint
-              let user;
-              try {
-                user = await storage.createUser({
-                  username: row.husbandID,
-                  password: await hashPassword(row.husbandID),
-                  role: 'head',
-                  gender: row.headGender || 'male', // Use gender from import data if available, default to 'male'
-                  phone: row.primaryPhone ? String(row.primaryPhone) : null
-                });
-              } catch (userCreationError: any) {
-                // Check if it's a duplicate username constraint error
-                if (userCreationError.message &&
-                    (userCreationError.message.includes('users_username_unique') ||
-                     userCreationError.message.includes('duplicate'))) {
-                  return { success: false, rowIndex: row.rowIndex, error: `رقم الهوية ${row.husbandID} مسجل مسبقاً` };
-                }
-                // Re-throw if it's a different error
-                throw userCreationError;
-              }
-
-              // Create family - handle possible duplicate constraint
-              const familyData = {
-                userId: user.id,
-                husbandName: row.husbandName,
-                husbandID: row.husbandID,
-                husbandBirthDate: row.husbandBirthDate || null,
-                husbandJob: row.husbandJob || null,
-                // Include wife data if available in the Excel file
-                wifeName: row.wifeName || null,
-                wifeID: row.wifeID || null,
-                wifeBirthDate: row.wifeBirthDate || null,
-                wifeJob: row.wifeJob || null,
-                wifePregnant: Boolean(row.wifePregnant) || false,
-                wifeHasDisability: Boolean(row.wifeHasDisability) || false,
-                wifeDisabilityType: row.wifeDisabilityType || null,
-                wifeHasChronicIllness: Boolean(row.wifeHasChronicIllness) || false,
-                wifeChronicIllnessType: row.wifeChronicIllnessType || null,
-                primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
-                secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
-                originalResidence: row.originalResidence || null,
-                currentHousing: row.currentHousing || null,
-                isDisplaced: Boolean(row.isDisplaced),
-                displacedLocation: row.displacedLocation || null,
-                isAbroad: Boolean(row.isAbroad),
-                warDamage2024: Boolean(row.warDamage2024),
-                warDamageDescription: row.warDamageDescription || null,
-                branch: row.branch || null,
-                landmarkNear: row.landmarkNear || null,
-                totalMembers: parseInt(String(row.totalMembers)) || 0,
-                numMales: parseInt(String(row.numMales)) || 0,
-                numFemales: parseInt(String(row.numFemales)) || 0,
-                socialStatus: row.socialStatus || null,
-                adminNotes: row.adminNotes || null
-              };
-
-              try {
-                await storage.createFamily(familyData);
-              } catch (familyCreationError: any) {
-                // If family creation fails due to duplicate constraint,
-                // we should delete the user we just created to maintain consistency
-                if (familyCreationError.message &&
-                    (familyCreationError.message.includes('husband_id_unique') ||
-                     familyCreationError.message.includes('duplicate'))) {
-                  // Clean up: delete the user we just created
-                  try {
-                    await storage.deleteUser(user.id);
-                  } catch (cleanupError) {
-                    console.error(`❌ Error cleaning up user after family creation failure:`, cleanupError);
-                  }
-                  return { success: false, rowIndex: row.rowIndex, error: `رقم الهوية ${row.husbandID} مسجل مسبقاً كعائلة` };
-                }
-                // Re-throw if it's a different error
-                throw familyCreationError;
-              }
-
-              return { success: true, rowIndex: row.rowIndex };
-            } catch (error: any) {
-              console.error(`❌ Error processing row ${row.rowIndex}:`, error.message);
-              return { success: false, rowIndex: row.rowIndex, error: error.message };
-            }
-          });
-
-          // Wait for batch to complete
-          const batchResults = await Promise.all(batchPromises);
-          
-          // Count results
-          batchResults.forEach(result => {
-            if (result.success) {
-              successCount++;
-            } else {
-              errors.push(`الصف ${result.rowIndex}: ${result.error}`);
-              errorCount++;
-            }
-          });
-
-          // Small delay between batches to prevent overwhelming the database
-          if (batchIndex < batches.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-
-        } catch (batchError: any) {
-          console.error(`❌ Batch ${batchIndex + 1} failed:`, batchError.message);
-          // Mark entire batch as failed
-          batch.forEach(row => {
-            errors.push(`الصف ${row.rowIndex}: فشل في المعالجة الجماعية`);
-            errorCount++;
-          });
-        }
+      // In a real implementation, you would store sessionData in Redis or database
+      // For now, we'll store in memory (not suitable for production)
+      if (!global.importSessions) {
+        global.importSessions = new Map();
       }
+      global.importSessions.set(sessionId, sessionData);
 
-      const resultMessage = `تم استيراد ${successCount} عائلة بنجاح، فشل في ${errorCount} صف`;
-      console.log(`✅ Import completed: ${resultMessage}`);
-      
+      console.log(`✅ Import session initialized: ${sessionId} for ${transformedData.length} records`);
+
       res.json({
-        message: resultMessage,
-        successCount,
-        errorCount,
-        errors: errors.slice(0, 20) // Limit errors to first 20 to avoid huge responses
+        sessionId,
+        totalRecords: transformedData.length,
+        message: `تم تهيئة جلسة الاستيراد لـ ${transformedData.length} سجل`
       });
 
     } catch (error: any) {
-      console.error('❌ Excel import error:', error);
-      console.error('Stack trace:', error.stack);
-      
-      let errorMessage = "خطأ في استيراد ملف Excel";
-      if (error.message.includes('Invalid file format')) {
-        errorMessage = "تنسيق الملف غير صحيح. يرجى استخدام ملف Excel (.xlsx أو .xls)";
-      } else if (error.message.includes('Permission denied')) {
-        errorMessage = "ليس لديك صلاحية لهذه العملية";
-      } else {
-        errorMessage += ": " + error.message;
+      console.error('❌ Error initializing import session:', error);
+      res.status(500).json({
+        message: "خطأ في تهيئة جلسة الاستيراد",
+        error: error.message
+      });
+    }
+  });
+
+  // Process chunk of imported data
+  app.post("/api/admin/import-heads/chunk", authMiddleware, async (req, res) => {
+    if (!['admin', 'root'].includes(req.user!.role)) {
+      return res.sendStatus(403);
+    }
+
+    try {
+      const { sessionId, startIdx, chunkSize = 50 } = req.body;
+
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
       }
-      
-      res.status(500).json({ message: errorMessage });
+
+      // Get session data
+      if (!global.importSessions) {
+        global.importSessions = new Map();
+      }
+
+      const session = global.importSessions.get(sessionId);
+      if (!session) {
+        return res.status(400).json({ message: "Invalid session ID" });
+      }
+
+      // Get the chunk of data to process
+      const startIndex = startIdx || session.processed || 0;
+      const endIndex = Math.min(startIndex + chunkSize, session.transformedData.length);
+      const chunk = session.transformedData.slice(startIndex, endIndex);
+
+      if (chunk.length === 0) {
+        // No more data to process
+        const progress = 100;
+        const processed = session.totalRecords;
+
+        res.json({
+          success: true,
+          processed,
+          total: session.totalRecords,
+          progress,
+          sessionId: sessionId,
+          message: `اكتمل استيراد ${processed} سجل`,
+          done: true
+        });
+        return;
+      }
+
+      console.log(`📊 Processing chunk for session ${sessionId}: ${chunk.length} records, start: ${startIndex}, end: ${endIndex}`);
+
+      // Import the chunk using our optimized service
+      const { BulkImportService } = await import('./services/bulk-import.service.js');
+      const result = await BulkImportService.fastBulkImport(chunk);
+
+      // Update session progress
+      session.processed = endIndex;
+      const progress = Math.round((session.processed / session.totalRecords) * 100);
+
+      console.log(`✅ Chunk processed: ${session.processed}/${session.totalRecords} (${progress}%)`);
+
+      res.json({
+        success: true,
+        processed: session.processed,
+        total: session.totalRecords,
+        progress: progress,
+        sessionId: sessionId,
+        message: `تمت معالجة ${session.processed}/${session.totalRecords} سجل`,
+        done: session.processed >= session.totalRecords
+      });
+
+    } catch (error: any) {
+      console.error('❌ Error processing import chunk:', error);
+      res.status(500).json({
+        message: "خطأ في معالجة جزء من البيانات",
+        error: error.message
+      });
+    }
+  });
+
+  // Get import status
+  app.get("/api/admin/import-heads/status/:sessionId", authMiddleware, async (req, res) => {
+    if (!['admin', 'root'].includes(req.user!.role)) {
+      return res.sendStatus(403);
+    }
+
+    try {
+      const { sessionId } = req.params;
+
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+
+      // Get session data
+      if (!global.importSessions) {
+        global.importSessions = new Map();
+      }
+
+      const session = global.importSessions.get(sessionId);
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+
+      const progress = session.totalRecords > 0
+        ? Math.round((session.processed / session.totalRecords) * 100)
+        : 0;
+
+      res.json({
+        sessionId: session.sessionId,
+        processed: session.processed,
+        total: session.totalRecords,
+        progress: progress,
+        status: session.processed >= session.totalRecords ? 'completed' : 'in-progress',
+        message: `مستوى التقدم ${progress}%`
+      });
+
+    } catch (error: any) {
+      console.error('❌ Error getting import status:', error);
+      res.status(500).json({
+        message: "خطأ في الحصول على حالة الاستيراد",
+        error: error.message
+      });
+    }
+  });
+
+  // Finalize import session
+  app.post("/api/admin/import-heads/finalize", authMiddleware, async (req, res) => {
+    if (!['admin', 'root'].includes(req.user!.role)) {
+      return res.sendStatus(403);
+    }
+
+    try {
+      const { sessionId } = req.body;
+
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+
+      // Get session data
+      if (!global.importSessions) {
+        global.importSessions = new Map();
+      }
+
+      const session = global.importSessions.get(sessionId);
+      if (!session) {
+        return res.status(400).json({ message: "Invalid session ID" });
+      }
+
+      // Clean up the session
+      global.importSessions.delete(sessionId);
+
+      console.log(`✅ Import session ${sessionId} finalized`);
+
+      res.json({
+        success: true,
+        message: `تم الانتهاء من استيراد ${session.processed} سجل بنجاح`
+      });
+
+    } catch (error: any) {
+      console.error('❌ Error finalizing import session:', error);
+      res.status(500).json({
+        message: "خطأ في إنهاء جلسة الاستيراد",
+        error: error.message
+      });
     }
   });
 
