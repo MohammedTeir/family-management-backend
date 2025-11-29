@@ -1,0 +1,1 @@
+ALTER TABLE "families" RENAME COLUMN "war_damage_2024" TO "war_damage_2023";

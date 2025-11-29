@@ -1,0 +1,1 @@
+ALTER TABLE "orphans" ADD COLUMN "image" text;

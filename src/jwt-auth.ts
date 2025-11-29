@@ -135,18 +135,29 @@ export async function loginHandler(req: Request, res: Response) {
       // Login failed - increment failed attempts
       const newFailedAttempts = (user.failedLoginAttempts || 0) + 1;
       let lockoutUntil = null;
-      
+
       // Check if we should lock the account
       if (newFailedAttempts >= maxLoginAttempts) {
         lockoutUntil = new Date(Date.now() + (lockoutDuration * 60 * 1000)); // Convert minutes to milliseconds
       }
-      
+
       // Update user with new failed attempts and lockout time
       await storage.updateUser(user.id, {
         failedLoginAttempts: newFailedAttempts,
         lockoutUntil: lockoutUntil
       });
-      
+
+      // Log failed login attempt
+      try {
+        await storage.createLog({
+          type: 'failed_login',
+          message: `محاولة تسجيل دخول فاشلة لمستخدم ${user.username} (${user.role})`,
+          userId: user.id,
+        });
+      } catch (logError) {
+        console.error('Error logging failed login event:', logError);
+      }
+
       // Return appropriate error message
       if (lockoutUntil) {
         return res.status(423).json({ message: `تم حظر الحساب لمدة ${lockoutDuration} دقيقة بسبب محاولات تسجيل الدخول الفاشلة المتكررة` });
@@ -164,6 +175,18 @@ export async function loginHandler(req: Request, res: Response) {
     
     // Generate JWT token
     const token = generateToken(user);
+
+    // Log successful login
+    try {
+      await storage.createLog({
+        type: 'login',
+        message: `تم تسجيل الدخول لمستخدم ${user.username} (${user.role})`,
+        userId: user.id,
+      });
+    } catch (logError) {
+      console.error('Error logging login event:', logError);
+    }
+
     res.status(200).json({ token, user });
     
   } catch (error) {

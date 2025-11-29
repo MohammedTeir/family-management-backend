@@ -9,6 +9,7 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   role: varchar("role", { length: 20 }).notNull().default("head"), // 'head', 'admin', 'root'
   phone: varchar("phone", { length: 20 }),
+  gender: varchar("gender", { length: 10 }).default("male"), // 'male', 'female', 'other'
   isProtected: boolean("is_protected").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
@@ -27,6 +28,22 @@ export const families = pgTable("families", {
   husbandID: varchar("husband_id", { length: 20 }).notNull().unique(),
   husbandBirthDate: varchar("husband_birth_date", { length: 10 }),
   husbandJob: text("husband_job"),
+  // Head of household disability and chronic illness
+  hasDisability: boolean("has_disability").default(false),
+  disabilityType: text("disability_type"),
+  hasChronicIllness: boolean("has_chronic_illness").default(false),
+  chronicIllnessType: text("chronic_illness_type"),
+  // Wife information
+  wifeName: text("wife_name"),
+  wifeID: varchar("wife_id", { length: 20 }),
+  wifeBirthDate: varchar("wife_birth_date", { length: 10 }),
+  wifeJob: text("wife_job"),
+  wifePregnant: boolean("wife_pregnant").default(false),
+  // Wife disability and chronic illness
+  wifeHasDisability: boolean("wife_has_disability").default(false),
+  wifeDisabilityType: text("wife_disability_type"),
+  wifeHasChronicIllness: boolean("wife_has_chronic_illness").default(false),
+  wifeChronicIllnessType: text("wife_chronic_illness_type"),
   primaryPhone: varchar("primary_phone", { length: 20 }),
   secondaryPhone: varchar("secondary_phone", { length: 20 }),
   originalResidence: text("original_residence"),
@@ -34,7 +51,7 @@ export const families = pgTable("families", {
   isDisplaced: boolean("is_displaced").default(false),
   displacedLocation: text("displaced_location"),
   isAbroad: boolean("is_abroad").default(false),
-  warDamage2024: boolean("war_damage_2024").default(false),
+  warDamage2023: boolean("war_damage_2023").default(false),
   warDamageDescription: text("war_damage_description"),
   branch: text("branch"),
   landmarkNear: text("landmark_near"),
@@ -51,18 +68,8 @@ export const families = pgTable("families", {
   createdAtIdx: index("families_created_at_idx").on(table.createdAt),
 }));
 
-export const wives = pgTable("wives", {
-  id: serial("id").primaryKey(),
-  familyId: integer("family_id").references(() => families.id).notNull(),
-  wifeName: text("wife_name").notNull(),
-  wifeID: varchar("wife_id", { length: 20 }),
-  wifeBirthDate: varchar("wife_birth_date", { length: 10 }),
-  wifeJob: text("wife_job"),
-  wifePregnant: boolean("wife_pregnant").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-}, (table) => ({
-  familyIdIdx: index("wives_family_id_idx").on(table.familyId),
-}));
+// Remove the separate wife table
+
 
 export const members = pgTable("members", {
   id: serial("id").primaryKey(),
@@ -71,8 +78,12 @@ export const members = pgTable("members", {
   memberID: varchar("member_id", { length: 20 }),
   birthDate: varchar("birth_date", { length: 10 }),
   gender: varchar("gender", { length: 10 }).notNull(),
+  // Disability fields
   isDisabled: boolean("is_disabled").default(false),
   disabilityType: text("disability_type"),
+  // Chronic illness fields
+  hasChronicIllness: boolean("has_chronic_illness").default(false),
+  chronicIllnessType: text("chronic_illness_type"),
   relationship: varchar("relationship", { length: 50 }).notNull(), // 'son', 'daughter', 'mother', 'other'
   isChild: boolean("is_child").default(true),
   createdAt: timestamp("created_at").defaultNow(),
@@ -107,6 +118,35 @@ export const notifications = pgTable("notifications", {
   recipients: integer("recipients").array(),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const orphans = pgTable("orphans", {
+  id: serial("id").primaryKey(),
+  familyId: integer("family_id").references(() => families.id).notNull(),
+  orphanName: text("orphan_name").notNull(),
+  orphanBirthDate: varchar("orphan_birth_date", { length: 10 }).notNull(),
+  orphanID: varchar("orphan_id", { length: 20 }).notNull(),
+  gender: varchar("gender", { length: 10 }).default("male"), // 'male', 'female'
+  guardianName: text("guardian_name").notNull(),
+  guardianID: varchar("guardian_id", { length: 20 }).notNull(),
+  guardianBirthDate: varchar("guardian_birth_date", { length: 10 }).notNull(),
+  fatherName: text("father_name").notNull(),
+  fatherID: varchar("father_id", { length: 20 }).notNull(),
+  martyrdomDate: varchar("martyrdom_date", { length: 10 }).notNull(),
+  martyrdomType: varchar("martyrdom_type", { length: 50 }).notNull(), // New field for martyrdom type
+  bankAccountNumber: text("bank_account_number").notNull(),
+  accountHolderName: text("account_holder_name").notNull(),
+  currentAddress: text("current_address").notNull(),
+  originalAddress: text("original_address").notNull(),
+  mobileNumber: varchar("mobile_number", { length: 20 }).notNull(),
+  backupMobileNumber: varchar("backup_mobile_number", { length: 20 }).notNull(),
+  image: text("image"), // Image field for orphan photos
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  familyIdIdx: index("orphans_family_id_idx").on(table.familyId),
+  orphanIdIdx: index("orphans_orphan_id_idx").on(table.orphanID),
+  guardianIdIdx: index("orphans_guardian_id_idx").on(table.guardianID),
+  createdAtIdx: index("orphans_created_at_idx").on(table.createdAt),
+}));
 
 export const documents = pgTable("documents", {
   id: serial("id").primaryKey(),
@@ -177,18 +217,6 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   updatedRecipients: many(voucherRecipients, { relationName: "recipientUpdater" }),
 }));
 
-export const familiesRelations = relations(families, ({ one, many }) => ({
-  user: one(users, {
-    fields: [families.userId],
-    references: [users.id],
-  }),
-  wives: many(wives),
-  members: many(members),
-  requests: many(requests),
-  documents: many(documents),
-  voucherRecipients: many(voucherRecipients),
-}));
-
 export const membersRelations = relations(members, ({ one }) => ({
   family: one(families, {
     fields: [members.familyId],
@@ -199,6 +227,13 @@ export const membersRelations = relations(members, ({ one }) => ({
 export const requestsRelations = relations(requests, ({ one }) => ({
   family: one(families, {
     fields: [requests.familyId],
+    references: [families.id],
+  }),
+}));
+
+export const orphansRelations = relations(orphans, ({ one }) => ({
+  family: one(families, {
+    fields: [orphans.familyId],
     references: [families.id],
   }),
 }));
@@ -217,13 +252,6 @@ export const supportVouchersRelations = relations(supportVouchers, ({ one, many 
     relationName: "voucherCreator",
   }),
   recipients: many(voucherRecipients),
-}));
-
-export const wivesRelations = relations(wives, ({ one }) => ({
-  family: one(families, {
-    fields: [wives.familyId],
-    references: [families.id],
-  }),
 }));
 
 export const voucherRecipientsRelations = relations(voucherRecipients, ({ one }) => ({
@@ -246,6 +274,8 @@ export const voucherRecipientsRelations = relations(voucherRecipients, ({ one })
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+}).extend({
+  gender: z.enum(['male', 'female']).optional(),
 });
 
 export const insertFamilySchema = createInsertSchema(families).omit({
@@ -253,14 +283,25 @@ export const insertFamilySchema = createInsertSchema(families).omit({
   createdAt: true,
 });
 
-export const insertWifeSchema = createInsertSchema(wives).omit({
+export const insertMemberSchema = createInsertSchema(members).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertMemberSchema = createInsertSchema(members).omit({
+export const insertOrphanSchema = createInsertSchema(orphans).omit({
   id: true,
   createdAt: true,
+}).extend({
+  orphanID: z.string().regex(/^\d{9}$/, "رقم هوية اليتيم يجب أن يكون 9 أرقام"),
+  guardianID: z.string().regex(/^\d{9}$/, "رقم هوية الوصي يجب أن يكون 9 أرقام"),
+  fatherID: z.string().regex(/^\d{9}$/, "رقم هوية الاب يجب أن يكون 9 أرقام"),
+  mobileNumber: z.string().regex(/^\d{10}$/, "رقم الجوال يجب أن يكون 10 أرقام"),
+  backupMobileNumber: z.string().regex(/^\d{10}$/, "رقم الجوال الاحتياطي يجب أن يكون 10 أرقام"),
+  gender: z.enum(['male', 'female']).optional(),
+  martyrdomType: z.enum(['war_2023', 'pre_2023_war', 'natural_death'], {
+    required_error: "حالة الوفاة مطلوبة",
+    invalid_type_error: "حالة الوفاة غير صحيحة"
+  }),
 });
 
 export const insertRequestSchema = createInsertSchema(requests).omit({
@@ -306,10 +347,10 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertFamily = z.infer<typeof insertFamilySchema>;
 export type Family = typeof families.$inferSelect;
-export type InsertWife = z.infer<typeof insertWifeSchema>;
-export type Wife = typeof wives.$inferSelect;
 export type InsertMember = z.infer<typeof insertMemberSchema>;
 export type Member = typeof members.$inferSelect;
+export type InsertOrphan = z.infer<typeof insertOrphanSchema>;
+export type Orphan = typeof orphans.$inferSelect;
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
 export type Request = typeof requests.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;

@@ -1,0 +1,1 @@
+ALTER TABLE "orphans" ADD COLUMN "martyrdom_type" varchar(50) NOT NULL;

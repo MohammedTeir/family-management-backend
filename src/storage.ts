@@ -1,14 +1,14 @@
-import { 
-  users, families, wives, members, requests, notifications, documents, logs, settings, supportVouchers, voucherRecipients,
-  type User, type InsertUser, type Family, type InsertFamily, type Wife, type InsertWife,
-  type Member, type InsertMember, type Request, type InsertRequest,
+import {
+  users, families, members, orphans, requests, notifications, documents, logs, settings, supportVouchers, voucherRecipients,
+  type User, type InsertUser, type Family, type InsertFamily,
+  type Member, type InsertMember, type Orphan, type InsertOrphan, type Request, type InsertRequest,
   type Notification, type InsertNotification, type Document, type InsertDocument,
   type Log, type InsertLog, type Settings, type InsertSettings,
   type SupportVoucher, type InsertSupportVoucher, type VoucherRecipient, type InsertVoucherRecipient
 } from "./schema.js";
 import { db } from "./db";
 import { withRetry } from "./db-retry.js";
-import { eq, desc, and, sql, isNull } from "drizzle-orm";
+import { eq, desc, and, sql, isNull, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -20,7 +20,7 @@ export interface IStorage {
   deleteUser(id: number): Promise<boolean>;
   getAllUsers(): Promise<User[]>;
   restoreUser(id: number): Promise<boolean>;
-  
+
   // Families
   getFamily(id: number): Promise<Family | undefined>;
   getFamilyByUserId(userId: number): Promise<Family | undefined>;
@@ -31,20 +31,29 @@ export interface IStorage {
   deleteFamily(id: number): Promise<boolean>;
   getFamiliesByUserId(userId: number): Promise<Family[]>;
 
-  // Wives
-  getWivesByFamilyId(familyId: number): Promise<Wife[]>;
-  getWife(id: number): Promise<Wife | undefined>;
-  createWife(wife: InsertWife): Promise<Wife>;
-  updateWife(id: number, wife: Partial<InsertWife>): Promise<Wife | undefined>;
+  // Wife is now stored in families table
+  getWifeByFamilyId(familyId: number): Promise<any | undefined>;
+  getWife(id: number): Promise<any | undefined>;
+  createWife(wife: any): Promise<any>;
+  updateWife(id: number, wife: Partial<any>): Promise<any | undefined>;
   deleteWife(id: number): Promise<boolean>;
-  
+
   // Members
   getMembersByFamilyId(familyId: number): Promise<Member[]>;
   createMember(member: InsertMember): Promise<Member>;
   updateMember(id: number, member: Partial<InsertMember>): Promise<Member | undefined>;
   deleteMember(id: number): Promise<boolean>;
   getMember(id: number): Promise<Member | undefined>;
- 
+
+  // Orphans
+  getOrphansByFamilyId(familyId: number): Promise<any[]>;
+  getAllOrphans(): Promise<any[]>;
+  getOrphansCountUnder18ByFamilyId(familyId: number): Promise<number>;
+  createOrphan(orphan: any): Promise<any>;
+  updateOrphan(id: number, orphan: Partial<any>): Promise<any | undefined>;
+  deleteOrphan(id: number): Promise<boolean>;
+  getOrphan(id: number): Promise<any | undefined>;
+
   // Requests
   getRequestsByFamilyId(familyId: number): Promise<Request[]>;
   getAllRequests(): Promise<Request[]>;
@@ -52,45 +61,46 @@ export interface IStorage {
   getRequest(id: number): Promise<Request | undefined>;
   createRequest(request: InsertRequest): Promise<Request>;
   updateRequest(id: number, request: Partial<InsertRequest>): Promise<Request | undefined>;
-  
+
   // Notifications
   getAllNotifications(): Promise<Notification[]>;
   createNotification(notification: InsertNotification): Promise<Notification>;
-  
+
   // Documents
   getDocumentsByFamilyId(familyId: number): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
   deleteDocument(id: number): Promise<boolean>;
-  
+
   // Logs
-  getLogs(filter?: { type?: string; userId?: number; search?: string; limit?: number; offset?: number }): Promise<Log[]>;
+  getLogs(filter?: { type?: string; userId?: number; search?: string; limit?: number; offset?: number; startDate?: string; endDate?: string }): Promise<Log[]>;
   createLog(log: InsertLog): Promise<Log>;
-  
+
   // Settings
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string, description?: string): Promise<void>;
   getAllSettings(): Promise<Settings[]>;
   clearSettingsCache(): void;
-  
+
   // Support Vouchers
   getAllSupportVouchers(): Promise<(SupportVoucher & { creator: User; recipients: VoucherRecipient[] })[]>;
   getAllSupportVouchersOptimized(): Promise<(SupportVoucher & { creator: User; recipients: (VoucherRecipient & { family: Family })[] })[]>;
   getSupportVoucher(id: number): Promise<SupportVoucher | undefined>;
   createSupportVoucher(voucher: InsertSupportVoucher): Promise<SupportVoucher>;
   updateSupportVoucher(id: number, voucher: Partial<InsertSupportVoucher>): Promise<SupportVoucher | undefined>;
-  
+
   // Voucher Recipients
   getVoucherRecipients(voucherId: number): Promise<(VoucherRecipient & { family: Family })[]>;
   getVoucherRecipientsOptimized(voucherId: number): Promise<(VoucherRecipient & { family: Family })[]>;
   createVoucherRecipient(recipient: InsertVoucherRecipient): Promise<VoucherRecipient>;
   updateVoucherRecipient(id: number, recipient: Partial<InsertVoucherRecipient>): Promise<VoucherRecipient | undefined>;
-  
+
   clearLogs(): Promise<void>;
   clearNotifications(): Promise<void>;
   clearRequests(): Promise<void>;
   clearMembers(): Promise<void>;
   clearFamilies(): Promise<void>;
   clearUsers(): Promise<void>;
+  clearHeads(): Promise<void>;
   clearSettings(): Promise<void>;
 }
 
@@ -113,7 +123,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await withRetry(() => 
+    const [user] = await withRetry(() =>
       db.select().from(users).where(and(eq(users.username, username), isNull(users.deletedAt)))
     );
     return user || undefined;
@@ -137,6 +147,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteUser(id: number): Promise<boolean> {
+    // Handle references to the user before deleting
+    // Set userId to null in logs
+    await db.update(logs).set({ userId: null }).where(eq(logs.userId, id));
+    // Set updatedBy to null in voucherRecipients
+    await db.update(voucherRecipients).set({ updatedBy: null }).where(eq(voucherRecipients.updatedBy, id));
+    // Transfer support vouchers created by this user to a default admin user (ID 1) to avoid notNull constraint
+    await db.update(supportVouchers).set({ createdBy: 1 }).where(eq(supportVouchers.createdBy, id));
+
     const result = await db.delete(users).where(eq(users.id, id));
     return (result?.rowCount ?? 0) > 0;
   }
@@ -149,6 +167,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async softDeleteUser(id: number): Promise<boolean> {
+    // Remove references to the user in related tables before soft deleting the user
+    await db.update(logs).set({ userId: null }).where(eq(logs.userId, id));
+    // For voucherRecipients, set updatedBy to null
+    await db.update(voucherRecipients).set({ updatedBy: null }).where(eq(voucherRecipients.updatedBy, id));
+    // Transfer support vouchers created by this user to a default admin user (ID 1) to avoid notNull constraint
+    await db.update(supportVouchers).set({ createdBy: 1 }).where(eq(supportVouchers.createdBy, id));
+
     const [user] = await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, id)).returning();
     return !!user;
   }
@@ -198,10 +223,10 @@ export class DatabaseStorage implements IStorage {
   async getAllFamiliesWithMembersOptimized(): Promise<(Family & { members: Member[] })[]> {
     // Get all families first
     const allFamilies = await this.getAllFamilies();
-    
+
     // Get ALL members in one query instead of 721 separate queries
     const allMembers = await db.select().from(members);
-    
+
     // Group members by familyId for O(1) lookup
     const membersByFamilyId = new Map<number, Member[]>();
     allMembers.forEach(member => {
@@ -210,25 +235,27 @@ export class DatabaseStorage implements IStorage {
       }
       membersByFamilyId.get(member.familyId)!.push(member);
     });
-    
+
     // Combine families with their members
     const familiesWithMembers = allFamilies.map(family => ({
       ...family,
       members: membersByFamilyId.get(family.id) || []
     }));
-    
+
     return familiesWithMembers;
   }
 
   async deleteFamily(id: number): Promise<boolean> {
-    // Delete all wives of the family
-    await db.delete(wives).where(eq(wives.familyId, id));
     // Delete all members of the family
     await db.delete(members).where(eq(members.familyId, id));
+    // Delete all orphans of the family
+    await db.delete(orphans).where(eq(orphans.familyId, id));
     // Delete all requests of the family
     await db.delete(requests).where(eq(requests.familyId, id));
     // Delete all documents of the family
     await db.delete(documents).where(eq(documents.familyId, id));
+    // Delete all voucher recipients of the family
+    await db.delete(voucherRecipients).where(eq(voucherRecipients.familyId, id));
     // Delete the family itself
     const result = await db.delete(families).where(eq(families.id, id));
     return (result?.rowCount ?? 0) > 0;
@@ -238,28 +265,94 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(families).where(eq(families.userId, userId));
   }
 
-  // Wives
-  async getWivesByFamilyId(familyId: number): Promise<Wife[]> {
-    return await db.select().from(wives).where(eq(wives.familyId, familyId));
+  // Wife is now part of families table - retrieve from family data
+  async getWifeByFamilyId(familyId: number): Promise<any | undefined> {
+    const family = await this.getFamily(familyId);
+    if (!family) return undefined;
+
+    // Return wife data from the family object
+    return {
+      id: family.id, // Use family ID as the identifier for the wife data
+      familyId: family.id,
+      wifeName: family.wifeName,
+      wifeID: family.wifeID,
+      wifeBirthDate: family.wifeBirthDate,
+      wifeJob: family.wifeJob,
+      wifePregnant: family.wifePregnant,
+      wifeHasDisability: family.wifeHasDisability,
+      wifeDisabilityType: family.wifeDisabilityType,
+      wifeHasChronicIllness: family.wifeHasChronicIllness,
+      wifeChronicIllnessType: family.wifeChronicIllnessType,
+      createdAt: family.createdAt // Using family's created at as reference
+    };
   }
 
-  async getWife(id: number): Promise<Wife | undefined> {
-    const [wife] = await db.select().from(wives).where(eq(wives.id, id));
-    return wife || undefined;
+  async getWife(id: number): Promise<any | undefined> {
+    // For now, this doesn't have a direct implementation since we don't have a separate wife table
+    // We could implement this by searching for a family that has wife data matching the ID
+    // But it's not a common use case
+    return undefined;
   }
 
-  async createWife(wife: InsertWife): Promise<Wife> {
-    const [createdWife] = await db.insert(wives).values(wife).returning();
-    return createdWife;
+  async createWife(wife: any): Promise<any> {
+    // Since wife data is now part of the family, we need to update the family with wife data
+    if (!wife.familyId) throw new Error("Family ID is required to add wife data");
+
+    const [updatedFamily] = await db.update(families).set({
+      wifeName: wife.wifeName,
+      wifeID: wife.wifeID,
+      wifeBirthDate: wife.wifeBirthDate,
+      wifeJob: wife.wifeJob,
+      wifePregnant: wife.wifePregnant,
+      wifeHasDisability: wife.wifeHasDisability,
+      wifeDisabilityType: wife.wifeDisabilityType,
+      wifeHasChronicIllness: wife.wifeHasChronicIllness,
+      wifeChronicIllnessType: wife.wifeChronicIllnessType,
+    }).where(eq(families.id, wife.familyId)).returning();
+
+    return updatedFamily;
   }
 
-  async updateWife(id: number, wife: Partial<InsertWife>): Promise<Wife | undefined> {
-    const [updatedWife] = await db.update(wives).set(wife).where(eq(wives.id, id)).returning();
-    return updatedWife || undefined;
+  async updateWife(id: number, wife: Partial<any>): Promise<any | undefined> {
+    // Find the family that has this wife data and update it
+    const family = await this.getFamily(id);
+    if (!family) return undefined;
+
+    const [updatedFamily] = await db.update(families).set({
+      wifeName: wife.wifeName,
+      wifeID: wife.wifeID,
+      wifeBirthDate: wife.wifeBirthDate,
+      wifeJob: wife.wifeJob,
+      wifePregnant: wife.wifePregnant,
+      wifeHasDisability: wife.wifeHasDisability,
+      wifeDisabilityType: wife.wifeDisabilityType,
+      wifeHasChronicIllness: wife.wifeChronicIllness,
+      wifeChronicIllnessType: wife.wifeChronicIllnessType,
+    }).where(eq(families.id, id)).returning();
+
+    return updatedFamily;
   }
 
   async deleteWife(id: number): Promise<boolean> {
-    const result = await db.delete(wives).where(eq(wives.id, id));
+    // Clear wife data from the family record instead of deleting a row
+    // Find the family with wife data matching the ID
+    const [family] = await db.select().from(families).where(
+      and(
+        eq(families.id, id),
+        isNull(families.wifeName).neg() // Check if wifeName exists
+      )
+    );
+
+    if (!family) return false;
+
+    const result = await db.update(families).set({
+      wifeName: null,
+      wifeID: null,
+      wifeBirthDate: null,
+      wifeJob: null,
+      wifePregnant: false,
+    }).where(eq(families.id, id));
+
     return (result?.rowCount ?? 0) > 0;
   }
 
@@ -288,6 +381,47 @@ export class DatabaseStorage implements IStorage {
     return (result?.rowCount ?? 0) > 0;
   }
 
+  // Orphans
+  async getOrphansByFamilyId(familyId: number): Promise<Orphan[]> {
+    return await db.select().from(orphans).where(eq(orphans.familyId, familyId));
+  }
+
+  async getAllOrphans(): Promise<Orphan[]> {
+    return await db.select().from(orphans);
+  }
+
+  async getOrphansCountUnder18ByFamilyId(familyId: number): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(orphans)
+      .where(
+        and(
+          eq(orphans.familyId, familyId),
+          sql`(CAST(${orphans.orphanBirthDate} AS DATE) > (CURRENT_DATE - INTERVAL '18 years'))`
+        )
+      );
+    return result[0]?.count || 0;
+  }
+
+  async getOrphan(id: number): Promise<Orphan | undefined> {
+    const [orphan] = await db.select().from(orphans).where(eq(orphans.id, id));
+    return orphan || undefined;
+  }
+
+  async createOrphan(orphan: InsertOrphan): Promise<Orphan> {
+    const [createdOrphan] = await db.insert(orphans).values(orphan).returning();
+    return createdOrphan;
+  }
+
+  async updateOrphan(id: number, orphan: Partial<InsertOrphan>): Promise<Orphan | undefined> {
+    const [updatedOrphan] = await db.update(orphans).set(orphan).where(eq(orphans.id, id)).returning();
+    return updatedOrphan || undefined;
+  }
+
+  async deleteOrphan(id: number): Promise<boolean> {
+    const result = await db.delete(orphans).where(eq(orphans.id, id));
+    return (result?.rowCount ?? 0) > 0;
+  }
+
   // Requests
   async getRequestsByFamilyId(familyId: number): Promise<Request[]> {
     return await db.select().from(requests).where(eq(requests.familyId, familyId)).orderBy(desc(requests.createdAt));
@@ -301,22 +435,22 @@ export class DatabaseStorage implements IStorage {
   async getAllRequestsWithFamilies(): Promise<(Request & { family: Family })[]> {
     // Get all requests first
     const allRequests = await this.getAllRequests();
-    
+
     // Get all families in one query instead of N separate queries
     const allFamilies = await this.getAllFamilies();
-    
+
     // Create family lookup map for O(1) access
     const familyMap = new Map<number, Family>();
     allFamilies.forEach(family => {
       familyMap.set(family.id, family);
     });
-    
+
     // Combine requests with their families
     const requestsWithFamilies = allRequests.map(request => ({
       ...request,
       family: familyMap.get(request.familyId)!
     }));
-    
+
     return requestsWithFamilies;
   }
 
@@ -364,11 +498,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Logs
-  async getLogs(filter: { type?: string; userId?: number; search?: string; limit?: number; offset?: number } = {}): Promise<Log[]> {
+  async getLogs(filter: { type?: string; userId?: number; search?: string; limit?: number; offset?: number; startDate?: string; endDate?: string } = {}): Promise<Log[]> {
     let query = db.select().from(logs);
     if (filter.type) query = query.where(eq(logs.type, filter.type));
     if (filter.userId) query = query.where(eq(logs.userId, filter.userId));
     if (filter.search) query = query.where(sql`${logs.message} ILIKE '%' || ${filter.search} || '%'`);
+    if (filter.startDate) query = query.where(sql`${logs.createdAt} >= ${filter.startDate}`);
+    if (filter.endDate) query = query.where(sql`${logs.createdAt} <= ${filter.endDate}`);
     if (filter.limit) query = query.limit(filter.limit);
     if (filter.offset) query = query.offset(filter.offset);
     return await query.orderBy(desc(logs.createdAt));
@@ -406,7 +542,7 @@ export class DatabaseStorage implements IStorage {
       target: settings.key,
       set: { value, description }
     });
-    
+
     // Update cache immediately
     this.settingsCache.set(key, value);
     console.log(`🔄 Setting '${key}' updated in cache`);
@@ -416,7 +552,7 @@ export class DatabaseStorage implements IStorage {
     if (!this.isCacheValid()) {
       await this.refreshSettingsCache();
     }
-    
+
     // Convert cache to Settings array format
     const settingsArray: Settings[] = [];
     for (const [key, value] of this.settingsCache.entries()) {
@@ -426,7 +562,7 @@ export class DatabaseStorage implements IStorage {
         settingsArray.push(fullSetting);
       }
     }
-    
+
     return settingsArray;
   }
 
@@ -440,7 +576,7 @@ export class DatabaseStorage implements IStorage {
   // Support Vouchers
   async getAllSupportVouchers(): Promise<(SupportVoucher & { creator: User; recipients: VoucherRecipient[] })[]> {
     const vouchers = await db.select().from(supportVouchers).orderBy(desc(supportVouchers.createdAt));
-    
+
     const vouchersWithDetails = await Promise.all(
       vouchers.map(async (voucher) => {
         const creator = await this.getUser(voucher.createdBy);
@@ -452,7 +588,7 @@ export class DatabaseStorage implements IStorage {
         };
       })
     );
-    
+
     return vouchersWithDetails;
   }
 
@@ -460,21 +596,21 @@ export class DatabaseStorage implements IStorage {
   async getAllSupportVouchersOptimized(): Promise<(SupportVoucher & { creator: User; recipients: (VoucherRecipient & { family: Family })[] })[]> {
     // Get all vouchers
     const vouchers = await db.select().from(supportVouchers).orderBy(desc(supportVouchers.createdAt));
-    
+
     // Get all users and families in bulk
     const [allUsers, allFamilies, allRecipients] = await Promise.all([
       this.getAllUsers(),
       this.getAllFamilies(),
       db.select().from(voucherRecipients)
     ]);
-    
+
     // Create lookup maps for O(1) access
     const userMap = new Map<number, User>();
     allUsers.forEach(user => userMap.set(user.id, user));
-    
+
     const familyMap = new Map<number, Family>();
     allFamilies.forEach(family => familyMap.set(family.id, family));
-    
+
     // Group recipients by voucherId
     const recipientsByVoucherId = new Map<number, (VoucherRecipient & { family: Family })[]>();
     allRecipients.forEach(recipient => {
@@ -486,14 +622,14 @@ export class DatabaseStorage implements IStorage {
         recipientsByVoucherId.get(recipient.voucherId)!.push({ ...recipient, family });
       }
     });
-    
+
     // Combine vouchers with their details
     const vouchersWithDetails = vouchers.map(voucher => ({
       ...voucher,
       creator: userMap.get(voucher.createdBy)!,
       recipients: recipientsByVoucherId.get(voucher.id) || []
     }));
-    
+
     return vouchersWithDetails;
   }
 
@@ -515,7 +651,7 @@ export class DatabaseStorage implements IStorage {
   // Voucher Recipients
   async getVoucherRecipients(voucherId: number): Promise<(VoucherRecipient & { family: Family })[]> {
     const recipients = await db.select().from(voucherRecipients).where(eq(voucherRecipients.voucherId, voucherId));
-    
+
     const recipientsWithFamilies = await Promise.all(
       recipients.map(async (recipient) => {
         const family = await this.getFamily(recipient.familyId);
@@ -525,7 +661,7 @@ export class DatabaseStorage implements IStorage {
         };
       })
     );
-    
+
     return recipientsWithFamilies;
   }
 
@@ -533,22 +669,22 @@ export class DatabaseStorage implements IStorage {
   async getVoucherRecipientsOptimized(voucherId: number): Promise<(VoucherRecipient & { family: Family })[]> {
     // Get recipients for this voucher
     const recipients = await db.select().from(voucherRecipients).where(eq(voucherRecipients.voucherId, voucherId));
-    
+
     if (recipients.length === 0) return [];
-    
+
     // Get all families in one query instead of N separate queries
     const allFamilies = await this.getAllFamilies();
-    
+
     // Create family lookup map for O(1) access
     const familyMap = new Map<number, Family>();
     allFamilies.forEach(family => familyMap.set(family.id, family));
-    
+
     // Combine recipients with their families
     const recipientsWithFamilies = recipients.map(recipient => ({
       ...recipient,
       family: familyMap.get(recipient.familyId)!
     }));
-    
+
     return recipientsWithFamilies;
   }
 
@@ -579,6 +715,31 @@ export class DatabaseStorage implements IStorage {
   }
   async clearUsers() {
     await db.delete(users);
+  }
+
+  async clearHeads() {
+    // Get all head users first to identify their families for cleanup
+    const headUsers = await db.select({ id: users.id, username: users.username }).from(users).where(eq(users.role, 'head'));
+    const headUserIds = headUsers.map(user => user.id);
+
+    if (headUserIds.length > 0) {
+      // Delete families associated with head users
+      await db.delete(families).where(inArray(families.userId, headUserIds));
+      // Delete the head users themselves
+      await db.delete(users).where(inArray(users.id, headUserIds));
+    }
+  }
+
+  async clearWives() {
+    // Update to clear wife data from families table instead of deleting wife table
+    const result = await db.update(families).set({
+      wifeName: null,
+      wifeID: null,
+      wifeBirthDate: null,
+      wifeJob: null,
+      wifePregnant: false,
+    });
+    return (result?.rowCount ?? 0) > 0;
   }
   async clearSettings() {
     await db.delete(settings);

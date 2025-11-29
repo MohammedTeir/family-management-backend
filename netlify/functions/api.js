@@ -4,6 +4,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -28,104 +31,30 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// package.json
-var require_package = __commonJS({
-  "package.json"(exports, module) {
-    module.exports = {
-      name: "family-management-backend",
-      version: "1.0.0",
-      type: "module",
-      license: "MIT",
-      scripts: {
-        dev: "NODE_ENV=development tsx src/index.ts",
-        build: "esbuild netlify/functions/api.ts --platform=node --packages=external --bundle --format=esm --outdir=netlify/functions && esbuild src/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-        start: "NODE_ENV=production node dist/index.js",
-        check: "tsc",
-        "db:push": "drizzle-kit push",
-        seed: "tsx src/seed.ts",
-        "heroku-postbuild": "npm run build"
-      },
-      dependencies: {
-        "@neondatabase/serverless": "^0.10.4",
-        "@netlify/functions": "^2.8.1",
-        bcryptjs: "^3.0.2",
-        "connect-pg-simple": "^10.0.0",
-        cors: "^2.8.5",
-        dotenv: "^17.2.1",
-        "drizzle-kit": "^0.30.4",
-        "drizzle-orm": "^0.39.1",
-        "drizzle-zod": "^0.7.0",
-        esbuild: "^0.25.0",
-        express: "^4.21.2",
-        "express-session": "^1.18.1",
-        memorystore: "^1.6.7",
-        multer: "^1.4.5-lts.1",
-        nanoid: "^5.1.5",
-        passport: "^0.7.0",
-        "passport-local": "^1.0.0",
-        "serverless-http": "^3.2.0",
-        ws: "^8.18.0",
-        xlsx: "^0.18.5",
-        zod: "^3.24.2",
-        "zod-validation-error": "^3.4.0"
-      },
-      devDependencies: {
-        "@types/connect-pg-simple": "^7.0.3",
-        "@types/cors": "^2.8.17",
-        "@types/express": "4.17.21",
-        "@types/express-session": "^1.18.0",
-        "@types/multer": "^1.4.12",
-        "@types/node": "^20.16.11",
-        "@types/passport": "^1.0.16",
-        "@types/passport-local": "^1.0.38",
-        "@types/ws": "^8.5.13",
-        tsx: "^4.19.1",
-        typescript: "5.6.3"
-      },
-      optionalDependencies: {
-        bufferutil: "^4.0.8"
-      }
-    };
-  }
-});
-
-// netlify/functions/api.ts
-import express from "express";
-
-// src/routes.ts
-import { createServer } from "http";
-
-// src/auth.ts
-import passport from "passport";
-import { Strategy as LocalStrategy } from "passport-local";
-import session2 from "express-session";
-import { scrypt, randomBytes, timingSafeEqual } from "crypto";
-import { promisify } from "util";
-import bcrypt from "bcryptjs";
-
 // src/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
   documents: () => documents,
   documentsRelations: () => documentsRelations,
-  families: () => families,
-  familiesRelations: () => familiesRelations,
+  families: () => families2,
   insertDocumentSchema: () => insertDocumentSchema,
   insertFamilySchema: () => insertFamilySchema,
   insertLogSchema: () => insertLogSchema,
   insertMemberSchema: () => insertMemberSchema,
   insertNotificationSchema: () => insertNotificationSchema,
+  insertOrphanSchema: () => insertOrphanSchema,
   insertRequestSchema: () => insertRequestSchema,
   insertSessionSchema: () => insertSessionSchema,
   insertSettingsSchema: () => insertSettingsSchema,
   insertSupportVoucherSchema: () => insertSupportVoucherSchema,
   insertUserSchema: () => insertUserSchema,
   insertVoucherRecipientSchema: () => insertVoucherRecipientSchema,
-  insertWifeSchema: () => insertWifeSchema,
   logs: () => logs,
   members: () => members,
   membersRelations: () => membersRelations,
   notifications: () => notifications,
+  orphans: () => orphans,
+  orphansRelations: () => orphansRelations,
   requests: () => requests,
   requestsRelations: () => requestsRelations,
   sessions: () => sessions,
@@ -135,564 +64,946 @@ __export(schema_exports, {
   users: () => users,
   usersRelations: () => usersRelations,
   voucherRecipients: () => voucherRecipients,
-  voucherRecipientsRelations: () => voucherRecipientsRelations,
-  wives: () => wives,
-  wivesRelations: () => wivesRelations
+  voucherRecipientsRelations: () => voucherRecipientsRelations
 });
-import { pgTable, text, serial, integer, boolean, timestamp, varchar } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
 import { relations } from "drizzle-orm";
-var users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  username: varchar("username", { length: 255 }).notNull().unique(),
-  password: text("password").notNull(),
-  role: varchar("role", { length: 20 }).notNull().default("head"),
-  // 'head', 'admin', 'root'
-  phone: varchar("phone", { length: 20 }),
-  isProtected: boolean("is_protected").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
-  lockoutUntil: timestamp("lockout_until"),
-  deletedAt: timestamp("deleted_at")
-  // <-- soft delete
+var users, families2, members, requests, notifications, orphans, documents, sessions, logs, settings, supportVouchers, voucherRecipients, usersRelations, membersRelations, requestsRelations, orphansRelations, documentsRelations, supportVouchersRelations, voucherRecipientsRelations, insertUserSchema, insertFamilySchema, insertMemberSchema, insertOrphanSchema, insertRequestSchema, insertNotificationSchema, insertDocumentSchema, insertLogSchema, insertSettingsSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema, insertSessionSchema;
+var init_schema = __esm({
+  "src/schema.ts"() {
+    "use strict";
+    users = pgTable("users", {
+      id: serial("id").primaryKey(),
+      username: varchar("username", { length: 255 }).notNull().unique(),
+      password: text("password").notNull(),
+      role: varchar("role", { length: 20 }).notNull().default("head"),
+      // 'head', 'admin', 'root'
+      phone: varchar("phone", { length: 20 }),
+      gender: varchar("gender", { length: 10 }).default("male"),
+      // 'male', 'female', 'other'
+      isProtected: boolean("is_protected").default(false),
+      createdAt: timestamp("created_at").defaultNow(),
+      failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+      lockoutUntil: timestamp("lockout_until"),
+      deletedAt: timestamp("deleted_at")
+      // <-- soft delete
+    }, (table) => ({
+      usernameIdx: index("users_username_idx").on(table.username),
+      roleIdx: index("users_role_idx").on(table.role),
+      deletedAtIdx: index("users_deleted_at_idx").on(table.deletedAt)
+    }));
+    families2 = pgTable("families", {
+      id: serial("id").primaryKey(),
+      userId: integer("user_id").references(() => users.id).notNull(),
+      husbandName: text("husband_name").notNull(),
+      husbandID: varchar("husband_id", { length: 20 }).notNull().unique(),
+      husbandBirthDate: varchar("husband_birth_date", { length: 10 }),
+      husbandJob: text("husband_job"),
+      // Head of household disability and chronic illness
+      hasDisability: boolean("has_disability").default(false),
+      disabilityType: text("disability_type"),
+      hasChronicIllness: boolean("has_chronic_illness").default(false),
+      chronicIllnessType: text("chronic_illness_type"),
+      // Wife information
+      wifeName: text("wife_name"),
+      wifeID: varchar("wife_id", { length: 20 }),
+      wifeBirthDate: varchar("wife_birth_date", { length: 10 }),
+      wifeJob: text("wife_job"),
+      wifePregnant: boolean("wife_pregnant").default(false),
+      // Wife disability and chronic illness
+      wifeHasDisability: boolean("wife_has_disability").default(false),
+      wifeDisabilityType: text("wife_disability_type"),
+      wifeHasChronicIllness: boolean("wife_has_chronic_illness").default(false),
+      wifeChronicIllnessType: text("wife_chronic_illness_type"),
+      primaryPhone: varchar("primary_phone", { length: 20 }),
+      secondaryPhone: varchar("secondary_phone", { length: 20 }),
+      originalResidence: text("original_residence"),
+      currentHousing: text("current_housing"),
+      isDisplaced: boolean("is_displaced").default(false),
+      displacedLocation: text("displaced_location"),
+      isAbroad: boolean("is_abroad").default(false),
+      warDamage2023: boolean("war_damage_2023").default(false),
+      warDamageDescription: text("war_damage_description"),
+      branch: text("branch"),
+      landmarkNear: text("landmark_near"),
+      totalMembers: integer("total_members").notNull().default(0),
+      numMales: integer("num_males").notNull().default(0),
+      numFemales: integer("num_females").notNull().default(0),
+      socialStatus: varchar("social_status", { length: 50 }),
+      adminNotes: text("admin_notes"),
+      createdAt: timestamp("created_at").defaultNow()
+    }, (table) => ({
+      // Critical performance indexes
+      userIdIdx: index("families_user_id_idx").on(table.userId),
+      husbandIdIdx: index("families_husband_id_idx").on(table.husbandID),
+      createdAtIdx: index("families_created_at_idx").on(table.createdAt)
+    }));
+    members = pgTable("members", {
+      id: serial("id").primaryKey(),
+      familyId: integer("family_id").references(() => families2.id).notNull(),
+      fullName: text("full_name").notNull(),
+      memberID: varchar("member_id", { length: 20 }),
+      birthDate: varchar("birth_date", { length: 10 }),
+      gender: varchar("gender", { length: 10 }).notNull(),
+      // Disability fields
+      isDisabled: boolean("is_disabled").default(false),
+      disabilityType: text("disability_type"),
+      // Chronic illness fields
+      hasChronicIllness: boolean("has_chronic_illness").default(false),
+      chronicIllnessType: text("chronic_illness_type"),
+      relationship: varchar("relationship", { length: 50 }).notNull(),
+      // 'son', 'daughter', 'mother', 'other'
+      isChild: boolean("is_child").default(true),
+      createdAt: timestamp("created_at").defaultNow()
+    }, (table) => ({
+      familyIdIdx: index("members_family_id_idx").on(table.familyId),
+      genderIdx: index("members_gender_idx").on(table.gender),
+      relationshipIdx: index("members_relationship_idx").on(table.relationship)
+    }));
+    requests = pgTable("requests", {
+      id: serial("id").primaryKey(),
+      familyId: integer("family_id").references(() => families2.id).notNull(),
+      type: varchar("type", { length: 50 }).notNull(),
+      // 'financial', 'medical', 'damage'
+      description: text("description").notNull(),
+      attachments: text("attachments").array(),
+      status: varchar("status", { length: 20 }).default("pending"),
+      // 'pending', 'approved', 'rejected'
+      adminComment: text("admin_comment"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    }, (table) => ({
+      familyIdIdx: index("requests_family_id_idx").on(table.familyId),
+      statusIdx: index("requests_status_idx").on(table.status),
+      typeIdx: index("requests_type_idx").on(table.type),
+      createdAtIdx: index("requests_created_at_idx").on(table.createdAt)
+    }));
+    notifications = pgTable("notifications", {
+      id: serial("id").primaryKey(),
+      title: text("title").notNull(),
+      message: text("message").notNull(),
+      target: varchar("target", { length: 20 }).default("all"),
+      // 'all', 'head', 'specific'
+      recipients: integer("recipients").array(),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    orphans = pgTable("orphans", {
+      id: serial("id").primaryKey(),
+      familyId: integer("family_id").references(() => families2.id).notNull(),
+      orphanName: text("orphan_name").notNull(),
+      orphanBirthDate: varchar("orphan_birth_date", { length: 10 }).notNull(),
+      orphanID: varchar("orphan_id", { length: 20 }).notNull(),
+      guardianName: text("guardian_name").notNull(),
+      guardianID: varchar("guardian_id", { length: 20 }).notNull(),
+      guardianBirthDate: varchar("guardian_birth_date", { length: 10 }).notNull(),
+      fatherName: text("father_name").notNull(),
+      fatherID: varchar("father_id", { length: 20 }).notNull(),
+      martyrdomDate: varchar("martyrdom_date", { length: 10 }).notNull(),
+      martyrdomType: varchar("martyrdom_type", { length: 50 }).notNull(),
+      // New field for martyrdom type
+      bankAccountNumber: text("bank_account_number").notNull(),
+      accountHolderName: text("account_holder_name").notNull(),
+      currentAddress: text("current_address").notNull(),
+      originalAddress: text("original_address").notNull(),
+      mobileNumber: varchar("mobile_number", { length: 20 }).notNull(),
+      backupMobileNumber: varchar("backup_mobile_number", { length: 20 }).notNull(),
+      createdAt: timestamp("created_at").defaultNow()
+    }, (table) => ({
+      familyIdIdx: index("orphans_family_id_idx").on(table.familyId),
+      orphanIdIdx: index("orphans_orphan_id_idx").on(table.orphanID),
+      guardianIdIdx: index("orphans_guardian_id_idx").on(table.guardianID),
+      createdAtIdx: index("orphans_created_at_idx").on(table.createdAt)
+    }));
+    documents = pgTable("documents", {
+      id: serial("id").primaryKey(),
+      familyId: integer("family_id").references(() => families2.id).notNull(),
+      filename: text("filename").notNull(),
+      originalName: text("original_name").notNull(),
+      fileSize: integer("file_size"),
+      mimeType: varchar("mime_type", { length: 100 }),
+      uploadedAt: timestamp("uploaded_at").defaultNow()
+    });
+    sessions = pgTable("session", {
+      sid: varchar("sid", { length: 255 }).primaryKey(),
+      sess: text("sess").notNull(),
+      // JSON string
+      expire: timestamp("expire", { mode: "date" }).notNull()
+    });
+    logs = pgTable("logs", {
+      id: serial("id").primaryKey(),
+      type: varchar("type", { length: 50 }).notNull(),
+      // e.g., 'admin', 'system', 'auth', etc.
+      message: text("message").notNull(),
+      userId: integer("user_id").references(() => users.id),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    settings = pgTable("settings", {
+      id: serial("id").primaryKey(),
+      key: varchar("key", { length: 100 }).notNull().unique(),
+      value: text("value").notNull(),
+      description: text("description"),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    supportVouchers = pgTable("support_vouchers", {
+      id: serial("id").primaryKey(),
+      title: text("title").notNull(),
+      description: text("description"),
+      supportType: varchar("support_type", { length: 50 }).notNull(),
+      // 'food_basket', 'cash_support', 'school_kit', 'medical', 'other'
+      createdBy: integer("created_by").references(() => users.id).notNull(),
+      createdAt: timestamp("created_at").defaultNow(),
+      location: text("location"),
+      isActive: boolean("is_active").default(true)
+    });
+    voucherRecipients = pgTable("voucher_recipients", {
+      id: serial("id").primaryKey(),
+      voucherId: integer("voucher_id").references(() => supportVouchers.id).notNull(),
+      familyId: integer("family_id").references(() => families2.id).notNull(),
+      status: varchar("status", { length: 20 }).default("pending"),
+      // 'pending', 'received', 'paid', 'not_attended'
+      notified: boolean("notified").default(false),
+      notifiedAt: timestamp("notified_at"),
+      updatedBy: integer("updated_by").references(() => users.id),
+      updatedAt: timestamp("updated_at").defaultNow(),
+      notes: text("notes")
+    }, (table) => ({
+      voucherIdIdx: index("voucher_recipients_voucher_id_idx").on(table.voucherId),
+      familyIdIdx: index("voucher_recipients_family_id_idx").on(table.familyId),
+      statusIdx: index("voucher_recipients_status_idx").on(table.status)
+    }));
+    usersRelations = relations(users, ({ one, many }) => ({
+      family: one(families2, {
+        fields: [users.id],
+        references: [families2.userId]
+      }),
+      createdVouchers: many(supportVouchers, { relationName: "voucherCreator" }),
+      updatedRecipients: many(voucherRecipients, { relationName: "recipientUpdater" })
+    }));
+    membersRelations = relations(members, ({ one }) => ({
+      family: one(families2, {
+        fields: [members.familyId],
+        references: [families2.id]
+      })
+    }));
+    requestsRelations = relations(requests, ({ one }) => ({
+      family: one(families2, {
+        fields: [requests.familyId],
+        references: [families2.id]
+      })
+    }));
+    orphansRelations = relations(orphans, ({ one }) => ({
+      family: one(families2, {
+        fields: [orphans.familyId],
+        references: [families2.id]
+      })
+    }));
+    documentsRelations = relations(documents, ({ one }) => ({
+      family: one(families2, {
+        fields: [documents.familyId],
+        references: [families2.id]
+      })
+    }));
+    supportVouchersRelations = relations(supportVouchers, ({ one, many }) => ({
+      creator: one(users, {
+        fields: [supportVouchers.createdBy],
+        references: [users.id],
+        relationName: "voucherCreator"
+      }),
+      recipients: many(voucherRecipients)
+    }));
+    voucherRecipientsRelations = relations(voucherRecipients, ({ one }) => ({
+      voucher: one(supportVouchers, {
+        fields: [voucherRecipients.voucherId],
+        references: [supportVouchers.id]
+      }),
+      family: one(families2, {
+        fields: [voucherRecipients.familyId],
+        references: [families2.id]
+      }),
+      updater: one(users, {
+        fields: [voucherRecipients.updatedBy],
+        references: [users.id],
+        relationName: "recipientUpdater"
+      })
+    }));
+    insertUserSchema = createInsertSchema(users).omit({
+      id: true,
+      createdAt: true
+    }).extend({
+      gender: z.enum(["male", "female", "other"]).optional()
+    });
+    insertFamilySchema = createInsertSchema(families2).omit({
+      id: true,
+      createdAt: true
+    });
+    insertMemberSchema = createInsertSchema(members).omit({
+      id: true,
+      createdAt: true
+    });
+    insertOrphanSchema = createInsertSchema(orphans).omit({
+      id: true,
+      createdAt: true
+    }).extend({
+      orphanID: z.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u064A\u062A\u064A\u0645 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645"),
+      guardianID: z.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0648\u0635\u064A \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645"),
+      fatherID: z.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0627\u0628 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645"),
+      mobileNumber: z.string().regex(/^\d{10}$/, "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 10 \u0623\u0631\u0642\u0627\u0645"),
+      backupMobileNumber: z.string().regex(/^\d{10}$/, "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 10 \u0623\u0631\u0642\u0627\u0645"),
+      martyrdomType: z.enum(["war_2023", "pre_2023_war", "natural_death"], {
+        required_error: "\u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u0641\u0627\u0629 \u0645\u0637\u0644\u0648\u0628\u0629",
+        invalid_type_error: "\u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u0641\u0627\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629"
+      })
+    });
+    insertRequestSchema = createInsertSchema(requests).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertNotificationSchema = createInsertSchema(notifications).omit({
+      id: true,
+      createdAt: true
+    });
+    insertDocumentSchema = createInsertSchema(documents).omit({
+      id: true,
+      uploadedAt: true
+    });
+    insertLogSchema = createInsertSchema(logs).omit({
+      id: true,
+      createdAt: true
+    });
+    insertSettingsSchema = createInsertSchema(settings).omit({
+      id: true,
+      updatedAt: true
+    });
+    insertSupportVoucherSchema = createInsertSchema(supportVouchers).omit({
+      id: true,
+      createdAt: true
+    });
+    insertVoucherRecipientSchema = createInsertSchema(voucherRecipients).omit({
+      id: true,
+      updatedAt: true
+    });
+    insertSessionSchema = createInsertSchema(sessions);
+  }
 });
-var families = pgTable("families", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id).notNull(),
-  husbandName: text("husband_name").notNull(),
-  husbandID: varchar("husband_id", { length: 20 }).notNull().unique(),
-  husbandBirthDate: varchar("husband_birth_date", { length: 10 }),
-  husbandJob: text("husband_job"),
-  primaryPhone: varchar("primary_phone", { length: 20 }),
-  secondaryPhone: varchar("secondary_phone", { length: 20 }),
-  originalResidence: text("original_residence"),
-  currentHousing: text("current_housing"),
-  isDisplaced: boolean("is_displaced").default(false),
-  displacedLocation: text("displaced_location"),
-  isAbroad: boolean("is_abroad").default(false),
-  warDamage2024: boolean("war_damage_2024").default(false),
-  warDamageDescription: text("war_damage_description"),
-  branch: text("branch"),
-  landmarkNear: text("landmark_near"),
-  totalMembers: integer("total_members").notNull().default(0),
-  numMales: integer("num_males").notNull().default(0),
-  numFemales: integer("num_females").notNull().default(0),
-  socialStatus: varchar("social_status", { length: 50 }),
-  adminNotes: text("admin_notes"),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var wives = pgTable("wives", {
-  id: serial("id").primaryKey(),
-  familyId: integer("family_id").references(() => families.id).notNull(),
-  wifeName: text("wife_name").notNull(),
-  wifeID: varchar("wife_id", { length: 20 }),
-  wifeBirthDate: varchar("wife_birth_date", { length: 10 }),
-  wifeJob: text("wife_job"),
-  wifePregnant: boolean("wife_pregnant").default(false),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var members = pgTable("members", {
-  id: serial("id").primaryKey(),
-  familyId: integer("family_id").references(() => families.id).notNull(),
-  fullName: text("full_name").notNull(),
-  memberID: varchar("member_id", { length: 20 }),
-  birthDate: varchar("birth_date", { length: 10 }),
-  gender: varchar("gender", { length: 10 }).notNull(),
-  isDisabled: boolean("is_disabled").default(false),
-  disabilityType: text("disability_type"),
-  relationship: varchar("relationship", { length: 50 }).notNull(),
-  // 'son', 'daughter', 'mother', 'other'
-  isChild: boolean("is_child").default(true),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var requests = pgTable("requests", {
-  id: serial("id").primaryKey(),
-  familyId: integer("family_id").references(() => families.id).notNull(),
-  type: varchar("type", { length: 50 }).notNull(),
-  // 'financial', 'medical', 'damage'
-  description: text("description").notNull(),
-  attachments: text("attachments").array(),
-  status: varchar("status", { length: 20 }).default("pending"),
-  // 'pending', 'approved', 'rejected'
-  adminComment: text("admin_comment"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var notifications = pgTable("notifications", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
-  message: text("message").notNull(),
-  target: varchar("target", { length: 20 }).default("all"),
-  // 'all', 'head', 'specific'
-  recipients: integer("recipients").array(),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var documents = pgTable("documents", {
-  id: serial("id").primaryKey(),
-  familyId: integer("family_id").references(() => families.id).notNull(),
-  filename: text("filename").notNull(),
-  originalName: text("original_name").notNull(),
-  fileSize: integer("file_size"),
-  mimeType: varchar("mime_type", { length: 100 }),
-  uploadedAt: timestamp("uploaded_at").defaultNow()
-});
-var sessions = pgTable("session", {
-  sid: varchar("sid", { length: 255 }).primaryKey(),
-  sess: text("sess").notNull(),
-  // JSON string
-  expire: timestamp("expire", { mode: "date" }).notNull()
-});
-var logs = pgTable("logs", {
-  id: serial("id").primaryKey(),
-  type: varchar("type", { length: 50 }).notNull(),
-  // e.g., 'admin', 'system', 'auth', etc.
-  message: text("message").notNull(),
-  userId: integer("user_id").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var settings = pgTable("settings", {
-  id: serial("id").primaryKey(),
-  key: varchar("key", { length: 100 }).notNull().unique(),
-  value: text("value").notNull(),
-  description: text("description"),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var supportVouchers = pgTable("support_vouchers", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
-  description: text("description"),
-  supportType: varchar("support_type", { length: 50 }).notNull(),
-  // 'food_basket', 'cash_support', 'school_kit', 'medical', 'other'
-  createdBy: integer("created_by").references(() => users.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-  location: text("location"),
-  isActive: boolean("is_active").default(true)
-});
-var voucherRecipients = pgTable("voucher_recipients", {
-  id: serial("id").primaryKey(),
-  voucherId: integer("voucher_id").references(() => supportVouchers.id).notNull(),
-  familyId: integer("family_id").references(() => families.id).notNull(),
-  status: varchar("status", { length: 20 }).default("pending"),
-  // 'pending', 'received', 'paid', 'not_attended'
-  notified: boolean("notified").default(false),
-  notifiedAt: timestamp("notified_at"),
-  updatedBy: integer("updated_by").references(() => users.id),
-  updatedAt: timestamp("updated_at").defaultNow(),
-  notes: text("notes")
-});
-var usersRelations = relations(users, ({ one, many }) => ({
-  family: one(families, {
-    fields: [users.id],
-    references: [families.userId]
-  }),
-  createdVouchers: many(supportVouchers, { relationName: "voucherCreator" }),
-  updatedRecipients: many(voucherRecipients, { relationName: "recipientUpdater" })
-}));
-var familiesRelations = relations(families, ({ one, many }) => ({
-  user: one(users, {
-    fields: [families.userId],
-    references: [users.id]
-  }),
-  wives: many(wives),
-  members: many(members),
-  requests: many(requests),
-  documents: many(documents),
-  voucherRecipients: many(voucherRecipients)
-}));
-var membersRelations = relations(members, ({ one }) => ({
-  family: one(families, {
-    fields: [members.familyId],
-    references: [families.id]
-  })
-}));
-var requestsRelations = relations(requests, ({ one }) => ({
-  family: one(families, {
-    fields: [requests.familyId],
-    references: [families.id]
-  })
-}));
-var documentsRelations = relations(documents, ({ one }) => ({
-  family: one(families, {
-    fields: [documents.familyId],
-    references: [families.id]
-  })
-}));
-var supportVouchersRelations = relations(supportVouchers, ({ one, many }) => ({
-  creator: one(users, {
-    fields: [supportVouchers.createdBy],
-    references: [users.id],
-    relationName: "voucherCreator"
-  }),
-  recipients: many(voucherRecipients)
-}));
-var wivesRelations = relations(wives, ({ one }) => ({
-  family: one(families, {
-    fields: [wives.familyId],
-    references: [families.id]
-  })
-}));
-var voucherRecipientsRelations = relations(voucherRecipients, ({ one }) => ({
-  voucher: one(supportVouchers, {
-    fields: [voucherRecipients.voucherId],
-    references: [supportVouchers.id]
-  }),
-  family: one(families, {
-    fields: [voucherRecipients.familyId],
-    references: [families.id]
-  }),
-  updater: one(users, {
-    fields: [voucherRecipients.updatedBy],
-    references: [users.id],
-    relationName: "recipientUpdater"
-  })
-}));
-var insertUserSchema = createInsertSchema(users).omit({
-  id: true,
-  createdAt: true
-});
-var insertFamilySchema = createInsertSchema(families).omit({
-  id: true,
-  createdAt: true
-});
-var insertWifeSchema = createInsertSchema(wives).omit({
-  id: true,
-  createdAt: true
-});
-var insertMemberSchema = createInsertSchema(members).omit({
-  id: true,
-  createdAt: true
-});
-var insertRequestSchema = createInsertSchema(requests).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertNotificationSchema = createInsertSchema(notifications).omit({
-  id: true,
-  createdAt: true
-});
-var insertDocumentSchema = createInsertSchema(documents).omit({
-  id: true,
-  uploadedAt: true
-});
-var insertLogSchema = createInsertSchema(logs).omit({
-  id: true,
-  createdAt: true
-});
-var insertSettingsSchema = createInsertSchema(settings).omit({
-  id: true,
-  updatedAt: true
-});
-var insertSupportVoucherSchema = createInsertSchema(supportVouchers).omit({
-  id: true,
-  createdAt: true
-});
-var insertVoucherRecipientSchema = createInsertSchema(voucherRecipients).omit({
-  id: true,
-  updatedAt: true
-});
-var insertSessionSchema = createInsertSchema(sessions);
 
 // src/db.ts
 import dotenv from "dotenv";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-dotenv.config();
-var { Pool } = pg;
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?"
-  );
-}
-var pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-    // ✅ Required for Neon over TCP
+var Pool, pool, db;
+var init_db = __esm({
+  "src/db.ts"() {
+    "use strict";
+    init_schema();
+    dotenv.config();
+    ({ Pool } = pg);
+    if (!process.env.DATABASE_URL) {
+      throw new Error(
+        "DATABASE_URL must be set. Did you forget to provision a database?"
+      );
+    }
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false
+        // ✅ Required for Neon over TCP
+      }
+    });
+    db = drizzle(pool, { schema: schema_exports });
   }
 });
-var db = drizzle(pool, { schema: schema_exports });
+
+// src/db-retry.ts
+function isConnectionError(error) {
+  if (!error) return false;
+  if (error.code && CONNECTION_ERROR_CODES.includes(error.code)) {
+    return true;
+  }
+  const message = error.message?.toLowerCase() || "";
+  return message.includes("connection") || message.includes("connect") || message.includes("terminating") || message.includes("timeout") || message.includes("network") || message.includes("closed");
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function withRetry(operation, maxAttempts = 3, initialDelay = 1e3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`\u{1F504} Database operation attempt ${attempt}/${maxAttempts}`);
+      const result = await operation();
+      if (attempt > 1) {
+        console.log(`\u2705 Database operation succeeded on attempt ${attempt}`);
+      }
+      return result;
+    } catch (error) {
+      lastError = error;
+      console.error(`\u274C Database operation failed on attempt ${attempt}:`, {
+        code: error.code,
+        message: error.message,
+        isConnectionError: isConnectionError(error)
+      });
+      if (attempt === maxAttempts || !isConnectionError(error)) {
+        break;
+      }
+      const delay = initialDelay * Math.pow(2, attempt - 1);
+      console.log(`\u23F3 Waiting ${delay}ms before retry...`);
+      await sleep(delay);
+      try {
+        console.log("\u{1F504} Testing database connection...");
+        await db.execute("SELECT 1");
+        console.log("\u2705 Database connection is healthy");
+      } catch (connectionError) {
+        console.log("\u26A0\uFE0F Database connection test failed, will retry operation anyway");
+      }
+    }
+  }
+  console.error("\u{1F4A5} Database operation failed after all retries:", {
+    code: lastError.code,
+    message: lastError.message,
+    maxAttempts,
+    isConnectionError: isConnectionError(lastError)
+  });
+  if (isConnectionError(lastError)) {
+    const enhancedError = new Error(
+      `Database temporarily unavailable. Please try again in a moment. (${lastError.message})`
+    );
+    enhancedError.code = lastError.code;
+    enhancedError.isConnectionError = true;
+    throw enhancedError;
+  }
+  throw lastError;
+}
+async function checkDatabaseHealth() {
+  try {
+    await withRetry(() => db.execute("SELECT 1"), 2, 500);
+    return { healthy: true };
+  } catch (error) {
+    return {
+      healthy: false,
+      error: error.message,
+      isConnectionError: isConnectionError(error)
+    };
+  }
+}
+var CONNECTION_ERROR_CODES;
+var init_db_retry = __esm({
+  "src/db-retry.ts"() {
+    "use strict";
+    init_db();
+    CONNECTION_ERROR_CODES = [
+      "57P01",
+      // admin_shutdown
+      "57P02",
+      // crash_shutdown  
+      "57P03",
+      // cannot_connect_now
+      "08000",
+      // connection_exception
+      "08003",
+      // connection_does_not_exist
+      "08006",
+      // connection_failure
+      "08001",
+      // sqlclient_unable_to_establish_sqlconnection
+      "08004"
+      // sqlserver_rejected_establishment_of_sqlconnection
+    ];
+  }
+});
 
 // src/storage.ts
-import { eq, desc, and, sql, isNull } from "drizzle-orm";
-import session from "express-session";
-import connectPg from "connect-pg-simple";
-var PostgresSessionStore = connectPg(session);
-var DatabaseStorage = class {
-  sessionStore;
-  constructor() {
-    this.sessionStore = new PostgresSessionStore({
-      pool,
-      createTableIfMissing: true
-    });
-  }
-  // Users
-  async getUser(id, opts) {
-    const whereClause = opts?.includeDeleted ? eq(users.id, id) : and(eq(users.id, id), isNull(users.deletedAt));
-    const [user] = await db.select().from(users).where(whereClause);
-    return user || void 0;
-  }
-  async getUserByUsername(username) {
-    const [user] = await db.select().from(users).where(and(eq(users.username, username), isNull(users.deletedAt)));
-    return user || void 0;
-  }
-  async getUserByNationalId(nationalId) {
-    const [family] = await db.select({ user: users }).from(families).innerJoin(users, and(eq(families.userId, users.id), isNull(users.deletedAt))).where(eq(families.husbandID, nationalId));
-    return family?.user || void 0;
-  }
-  async createUser(insertUser) {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
-  }
-  async updateUser(id, user) {
-    const [updatedUser] = await db.update(users).set(user).where(eq(users.id, id)).returning();
-    return updatedUser || void 0;
-  }
-  async deleteUser(id) {
-    const result = await db.delete(users).where(eq(users.id, id));
-    return (result?.rowCount ?? 0) > 0;
-  }
-  async getAllUsers(opts) {
-    if (opts?.includeDeleted) {
-      return await db.select().from(users);
-    }
-    return await db.select().from(users).where(isNull(users.deletedAt));
-  }
-  async softDeleteUser(id) {
-    const [user] = await db.update(users).set({ deletedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
-    return !!user;
-  }
-  async restoreUser(id) {
-    const [user] = await db.update(users).set({ deletedAt: null }).where(eq(users.id, id)).returning();
-    return !!user;
-  }
-  // Families
-  async getFamily(id) {
-    const [family] = await db.select().from(families).where(eq(families.id, id));
-    return family || void 0;
-  }
-  async getFamilyByUserId(userId) {
-    const [family] = await db.select().from(families).where(eq(families.userId, userId));
-    return family || void 0;
-  }
-  async createFamily(family) {
-    const [createdFamily] = await db.insert(families).values(family).returning();
-    return createdFamily;
-  }
-  async updateFamily(id, family) {
-    const [updatedFamily] = await db.update(families).set(family).where(eq(families.id, id)).returning();
-    return updatedFamily || void 0;
-  }
-  async getAllFamilies() {
-    return await db.select().from(families).orderBy(desc(families.createdAt));
-  }
-  async getAllFamiliesWithMembers() {
-    const allFamilies = await this.getAllFamilies();
-    const familiesWithMembers = await Promise.all(
-      allFamilies.map(async (family) => {
-        const members2 = await this.getMembersByFamilyId(family.id);
-        return { ...family, members: members2 };
-      })
-    );
-    return familiesWithMembers;
-  }
-  async deleteFamily(id) {
-    await db.delete(wives).where(eq(wives.familyId, id));
-    await db.delete(members).where(eq(members.familyId, id));
-    await db.delete(requests).where(eq(requests.familyId, id));
-    await db.delete(documents).where(eq(documents.familyId, id));
-    const result = await db.delete(families).where(eq(families.id, id));
-    return (result?.rowCount ?? 0) > 0;
-  }
-  async getFamiliesByUserId(userId) {
-    return await db.select().from(families).where(eq(families.userId, userId));
-  }
-  // Wives
-  async getWivesByFamilyId(familyId) {
-    return await db.select().from(wives).where(eq(wives.familyId, familyId));
-  }
-  async getWife(id) {
-    const [wife] = await db.select().from(wives).where(eq(wives.id, id));
-    return wife || void 0;
-  }
-  async createWife(wife) {
-    const [createdWife] = await db.insert(wives).values(wife).returning();
-    return createdWife;
-  }
-  async updateWife(id, wife) {
-    const [updatedWife] = await db.update(wives).set(wife).where(eq(wives.id, id)).returning();
-    return updatedWife || void 0;
-  }
-  async deleteWife(id) {
-    const result = await db.delete(wives).where(eq(wives.id, id));
-    return (result?.rowCount ?? 0) > 0;
-  }
-  // Members
-  async getMembersByFamilyId(familyId) {
-    return await db.select().from(members).where(eq(members.familyId, familyId));
-  }
-  async getMember(id) {
-    const [member] = await db.select().from(members).where(eq(members.id, id));
-    return member || void 0;
-  }
-  async createMember(member) {
-    const [createdMember] = await db.insert(members).values(member).returning();
-    return createdMember;
-  }
-  async updateMember(id, member) {
-    const [updatedMember] = await db.update(members).set(member).where(eq(members.id, id)).returning();
-    return updatedMember || void 0;
-  }
-  async deleteMember(id) {
-    const result = await db.delete(members).where(eq(members.id, id));
-    return (result?.rowCount ?? 0) > 0;
-  }
-  // Requests
-  async getRequestsByFamilyId(familyId) {
-    return await db.select().from(requests).where(eq(requests.familyId, familyId)).orderBy(desc(requests.createdAt));
-  }
-  async getAllRequests() {
-    return await db.select().from(requests).orderBy(desc(requests.createdAt));
-  }
-  async getRequest(id) {
-    const [request] = await db.select().from(requests).where(eq(requests.id, id));
-    return request || void 0;
-  }
-  async createRequest(request) {
-    const [createdRequest] = await db.insert(requests).values(request).returning();
-    return createdRequest;
-  }
-  async updateRequest(id, request) {
-    const [updatedRequest] = await db.update(requests).set({
-      ...request,
-      updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq(requests.id, id)).returning();
-    return updatedRequest || void 0;
-  }
-  // Notifications
-  async getAllNotifications() {
-    return await db.select().from(notifications).orderBy(desc(notifications.createdAt));
-  }
-  async createNotification(notification) {
-    const [createdNotification] = await db.insert(notifications).values(notification).returning();
-    return createdNotification;
-  }
-  // Documents
-  async getDocumentsByFamilyId(familyId) {
-    return await db.select().from(documents).where(eq(documents.familyId, familyId));
-  }
-  async createDocument(document) {
-    const [createdDocument] = await db.insert(documents).values(document).returning();
-    return createdDocument;
-  }
-  async deleteDocument(id) {
-    const result = await db.delete(documents).where(eq(documents.id, id));
-    return (result?.rowCount ?? 0) > 0;
-  }
-  // Logs
-  async getLogs(filter = {}) {
-    let query = db.select().from(logs);
-    if (filter.type) query = query.where(eq(logs.type, filter.type));
-    if (filter.userId) query = query.where(eq(logs.userId, filter.userId));
-    if (filter.search) query = query.where(sql`${logs.message} ILIKE '%' || ${filter.search} || '%'`);
-    if (filter.limit) query = query.limit(filter.limit);
-    if (filter.offset) query = query.offset(filter.offset);
-    return await query.orderBy(desc(logs.createdAt));
-  }
-  async createLog(log) {
-    const [created] = await db.insert(logs).values(log).returning();
-    return created;
-  }
-  // Settings
-  async getSetting(key) {
-    const [setting] = await db.select().from(settings).where(eq(settings.key, key));
-    return setting?.value || void 0;
-  }
-  async setSetting(key, value, description) {
-    await db.insert(settings).values({ key, value, description }).onConflictDoUpdate({
-      target: settings.key,
-      set: { value, description }
-    });
-  }
-  async getAllSettings() {
-    return await db.select().from(settings);
-  }
-  // Support Vouchers
-  async getAllSupportVouchers() {
-    const vouchers = await db.select().from(supportVouchers).orderBy(desc(supportVouchers.createdAt));
-    const vouchersWithDetails = await Promise.all(
-      vouchers.map(async (voucher) => {
-        const creator = await this.getUser(voucher.createdBy);
-        const recipients = await this.getVoucherRecipients(voucher.id);
+import { eq as eq2, desc, and, sql, isNull } from "drizzle-orm";
+var DatabaseStorage, storage;
+var init_storage = __esm({
+  "src/storage.ts"() {
+    "use strict";
+    init_schema();
+    init_db();
+    init_db_retry();
+    DatabaseStorage = class {
+      // Settings cache to avoid repeated database queries
+      settingsCache = /* @__PURE__ */ new Map();
+      settingsCacheExpiry = 0;
+      CACHE_TTL = 5 * 60 * 1e3;
+      // 5 minutes
+      constructor() {
+      }
+      // Users
+      async getUser(id, opts) {
+        const whereClause = opts?.includeDeleted ? eq2(users.id, id) : and(eq2(users.id, id), isNull(users.deletedAt));
+        const [user] = await db.select().from(users).where(whereClause);
+        return user || void 0;
+      }
+      async getUserByUsername(username) {
+        const [user] = await withRetry(
+          () => db.select().from(users).where(and(eq2(users.username, username), isNull(users.deletedAt)))
+        );
+        return user || void 0;
+      }
+      async getUserByNationalId(nationalId) {
+        const [family] = await db.select({ user: users }).from(families2).innerJoin(users, and(eq2(families2.userId, users.id), isNull(users.deletedAt))).where(eq2(families2.husbandID, nationalId));
+        return family?.user || void 0;
+      }
+      async createUser(insertUser) {
+        const [user] = await db.insert(users).values(insertUser).returning();
+        return user;
+      }
+      async updateUser(id, user) {
+        const [updatedUser] = await db.update(users).set(user).where(eq2(users.id, id)).returning();
+        return updatedUser || void 0;
+      }
+      async deleteUser(id) {
+        const result = await db.delete(users).where(eq2(users.id, id));
+        return (result?.rowCount ?? 0) > 0;
+      }
+      async getAllUsers(opts) {
+        if (opts?.includeDeleted) {
+          return await db.select().from(users);
+        }
+        return await db.select().from(users).where(isNull(users.deletedAt));
+      }
+      async softDeleteUser(id) {
+        const [user] = await db.update(users).set({ deletedAt: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).returning();
+        return !!user;
+      }
+      async restoreUser(id) {
+        const [user] = await db.update(users).set({ deletedAt: null }).where(eq2(users.id, id)).returning();
+        return !!user;
+      }
+      // Families
+      async getFamily(id) {
+        const [family] = await db.select().from(families2).where(eq2(families2.id, id));
+        return family || void 0;
+      }
+      async getFamilyByUserId(userId) {
+        const [family] = await db.select().from(families2).where(eq2(families2.userId, userId));
+        return family || void 0;
+      }
+      async createFamily(family) {
+        const [createdFamily] = await db.insert(families2).values(family).returning();
+        return createdFamily;
+      }
+      async updateFamily(id, family) {
+        const [updatedFamily] = await db.update(families2).set(family).where(eq2(families2.id, id)).returning();
+        return updatedFamily || void 0;
+      }
+      async getAllFamilies() {
+        return await db.select().from(families2).orderBy(desc(families2.createdAt));
+      }
+      async getAllFamiliesWithMembers() {
+        const allFamilies = await this.getAllFamilies();
+        const familiesWithMembers = await Promise.all(
+          allFamilies.map(async (family) => {
+            const members2 = await this.getMembersByFamilyId(family.id);
+            return { ...family, members: members2 };
+          })
+        );
+        return familiesWithMembers;
+      }
+      // Optimized version using JOIN to avoid N+1 queries
+      async getAllFamiliesWithMembersOptimized() {
+        const allFamilies = await this.getAllFamilies();
+        const allMembers = await db.select().from(members);
+        const membersByFamilyId = /* @__PURE__ */ new Map();
+        allMembers.forEach((member) => {
+          if (!membersByFamilyId.has(member.familyId)) {
+            membersByFamilyId.set(member.familyId, []);
+          }
+          membersByFamilyId.get(member.familyId).push(member);
+        });
+        const familiesWithMembers = allFamilies.map((family) => ({
+          ...family,
+          members: membersByFamilyId.get(family.id) || []
+        }));
+        return familiesWithMembers;
+      }
+      async deleteFamily(id) {
+        await db.delete(members).where(eq2(members.familyId, id));
+        await db.delete(requests).where(eq2(requests.familyId, id));
+        await db.delete(documents).where(eq2(documents.familyId, id));
+        const result = await db.delete(families2).where(eq2(families2.id, id));
+        return (result?.rowCount ?? 0) > 0;
+      }
+      async getFamiliesByUserId(userId) {
+        return await db.select().from(families2).where(eq2(families2.userId, userId));
+      }
+      // Wife is now part of families table - retrieve from family data
+      async getWifeByFamilyId(familyId) {
+        const family = await this.getFamily(familyId);
+        if (!family) return void 0;
         return {
+          id: family.id,
+          // Use family ID as the identifier for the wife data
+          familyId: family.id,
+          wifeName: family.wifeName,
+          wifeID: family.wifeID,
+          wifeBirthDate: family.wifeBirthDate,
+          wifeJob: family.wifeJob,
+          wifePregnant: family.wifePregnant,
+          wifeHasDisability: family.wifeHasDisability,
+          wifeDisabilityType: family.wifeDisabilityType,
+          wifeHasChronicIllness: family.wifeHasChronicIllness,
+          wifeChronicIllnessType: family.wifeChronicIllnessType,
+          createdAt: family.createdAt
+          // Using family's created at as reference
+        };
+      }
+      async getWife(id) {
+        return void 0;
+      }
+      async createWife(wife) {
+        if (!wife.familyId) throw new Error("Family ID is required to add wife data");
+        const [updatedFamily] = await db.update(families2).set({
+          wifeName: wife.wifeName,
+          wifeID: wife.wifeID,
+          wifeBirthDate: wife.wifeBirthDate,
+          wifeJob: wife.wifeJob,
+          wifePregnant: wife.wifePregnant,
+          wifeHasDisability: wife.wifeHasDisability,
+          wifeDisabilityType: wife.wifeDisabilityType,
+          wifeHasChronicIllness: wife.wifeHasChronicIllness,
+          wifeChronicIllnessType: wife.wifeChronicIllnessType
+        }).where(eq2(families2.id, wife.familyId)).returning();
+        return updatedFamily;
+      }
+      async updateWife(id, wife) {
+        const family = await this.getFamily(id);
+        if (!family) return void 0;
+        const [updatedFamily] = await db.update(families2).set({
+          wifeName: wife.wifeName,
+          wifeID: wife.wifeID,
+          wifeBirthDate: wife.wifeBirthDate,
+          wifeJob: wife.wifeJob,
+          wifePregnant: wife.wifePregnant,
+          wifeHasDisability: wife.wifeHasDisability,
+          wifeDisabilityType: wife.wifeDisabilityType,
+          wifeHasChronicIllness: wife.wifeChronicIllness,
+          wifeChronicIllnessType: wife.wifeChronicIllnessType
+        }).where(eq2(families2.id, id)).returning();
+        return updatedFamily;
+      }
+      async deleteWife(id) {
+        const [family] = await db.select().from(families2).where(
+          and(
+            eq2(families2.id, id),
+            isNull(families2.wifeName).neg()
+            // Check if wifeName exists
+          )
+        );
+        if (!family) return false;
+        const result = await db.update(families2).set({
+          wifeName: null,
+          wifeID: null,
+          wifeBirthDate: null,
+          wifeJob: null,
+          wifePregnant: false
+        }).where(eq2(families2.id, id));
+        return (result?.rowCount ?? 0) > 0;
+      }
+      // Members
+      async getMembersByFamilyId(familyId) {
+        return await db.select().from(members).where(eq2(members.familyId, familyId));
+      }
+      async getMember(id) {
+        const [member] = await db.select().from(members).where(eq2(members.id, id));
+        return member || void 0;
+      }
+      async createMember(member) {
+        const [createdMember] = await db.insert(members).values(member).returning();
+        return createdMember;
+      }
+      async updateMember(id, member) {
+        const [updatedMember] = await db.update(members).set(member).where(eq2(members.id, id)).returning();
+        return updatedMember || void 0;
+      }
+      async deleteMember(id) {
+        const result = await db.delete(members).where(eq2(members.id, id));
+        return (result?.rowCount ?? 0) > 0;
+      }
+      // Orphans
+      async getOrphansByFamilyId(familyId) {
+        return await db.select().from(orphans).where(eq2(orphans.familyId, familyId));
+      }
+      async getAllOrphans() {
+        return await db.select().from(orphans);
+      }
+      async getOrphansCountUnder18ByFamilyId(familyId) {
+        const result = await db.select({ count: sql`count(*)` }).from(orphans).where(
+          and(
+            eq2(orphans.familyId, familyId),
+            sql`(${orphans.orphanBirthDate} > (CURRENT_DATE - INTERVAL '18 years'))`
+          )
+        );
+        return result[0]?.count || 0;
+      }
+      async getOrphan(id) {
+        const [orphan] = await db.select().from(orphans).where(eq2(orphans.id, id));
+        return orphan || void 0;
+      }
+      async createOrphan(orphan) {
+        const [createdOrphan] = await db.insert(orphans).values(orphan).returning();
+        return createdOrphan;
+      }
+      async updateOrphan(id, orphan) {
+        const [updatedOrphan] = await db.update(orphans).set(orphan).where(eq2(orphans.id, id)).returning();
+        return updatedOrphan || void 0;
+      }
+      async deleteOrphan(id) {
+        const result = await db.delete(orphans).where(eq2(orphans.id, id));
+        return (result?.rowCount ?? 0) > 0;
+      }
+      // Requests
+      async getRequestsByFamilyId(familyId) {
+        return await db.select().from(requests).where(eq2(requests.familyId, familyId)).orderBy(desc(requests.createdAt));
+      }
+      async getAllRequests() {
+        return await db.select().from(requests).orderBy(desc(requests.createdAt));
+      }
+      // Optimized version to avoid N+1 queries for requests with families
+      async getAllRequestsWithFamilies() {
+        const allRequests = await this.getAllRequests();
+        const allFamilies = await this.getAllFamilies();
+        const familyMap = /* @__PURE__ */ new Map();
+        allFamilies.forEach((family) => {
+          familyMap.set(family.id, family);
+        });
+        const requestsWithFamilies = allRequests.map((request) => ({
+          ...request,
+          family: familyMap.get(request.familyId)
+        }));
+        return requestsWithFamilies;
+      }
+      async getRequest(id) {
+        const [request] = await db.select().from(requests).where(eq2(requests.id, id));
+        return request || void 0;
+      }
+      async createRequest(request) {
+        const [createdRequest] = await db.insert(requests).values(request).returning();
+        return createdRequest;
+      }
+      async updateRequest(id, request) {
+        const [updatedRequest] = await db.update(requests).set({
+          ...request,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq2(requests.id, id)).returning();
+        return updatedRequest || void 0;
+      }
+      // Notifications
+      async getAllNotifications() {
+        return await db.select().from(notifications).orderBy(desc(notifications.createdAt));
+      }
+      async createNotification(notification) {
+        const [createdNotification] = await db.insert(notifications).values(notification).returning();
+        return createdNotification;
+      }
+      // Documents
+      async getDocumentsByFamilyId(familyId) {
+        return await db.select().from(documents).where(eq2(documents.familyId, familyId));
+      }
+      async createDocument(document) {
+        const [createdDocument] = await db.insert(documents).values(document).returning();
+        return createdDocument;
+      }
+      async deleteDocument(id) {
+        const result = await db.delete(documents).where(eq2(documents.id, id));
+        return (result?.rowCount ?? 0) > 0;
+      }
+      // Logs
+      async getLogs(filter = {}) {
+        let query = db.select().from(logs);
+        if (filter.type) query = query.where(eq2(logs.type, filter.type));
+        if (filter.userId) query = query.where(eq2(logs.userId, filter.userId));
+        if (filter.search) query = query.where(sql`${logs.message} ILIKE '%' || ${filter.search} || '%'`);
+        if (filter.limit) query = query.limit(filter.limit);
+        if (filter.offset) query = query.offset(filter.offset);
+        return await query.orderBy(desc(logs.createdAt));
+      }
+      async createLog(log) {
+        const [created] = await db.insert(logs).values(log).returning();
+        return created;
+      }
+      // Settings (with caching)
+      isCacheValid() {
+        return Date.now() < this.settingsCacheExpiry;
+      }
+      async refreshSettingsCache() {
+        console.log("\u{1F504} Refreshing settings cache...");
+        const allSettings = await db.select().from(settings);
+        this.settingsCache.clear();
+        allSettings.forEach((setting) => {
+          this.settingsCache.set(setting.key, setting.value);
+        });
+        this.settingsCacheExpiry = Date.now() + this.CACHE_TTL;
+        console.log(`\u2705 Settings cache refreshed with ${allSettings.length} settings`);
+      }
+      async getSetting(key) {
+        if (!this.isCacheValid()) {
+          await this.refreshSettingsCache();
+        }
+        return this.settingsCache.get(key);
+      }
+      async setSetting(key, value, description) {
+        await db.insert(settings).values({ key, value, description }).onConflictDoUpdate({
+          target: settings.key,
+          set: { value, description }
+        });
+        this.settingsCache.set(key, value);
+        console.log(`\u{1F504} Setting '${key}' updated in cache`);
+      }
+      async getAllSettings() {
+        if (!this.isCacheValid()) {
+          await this.refreshSettingsCache();
+        }
+        const settingsArray = [];
+        for (const [key, value] of this.settingsCache.entries()) {
+          const [fullSetting] = await db.select().from(settings).where(eq2(settings.key, key));
+          if (fullSetting) {
+            settingsArray.push(fullSetting);
+          }
+        }
+        return settingsArray;
+      }
+      // Method to clear cache when settings are bulk updated
+      clearSettingsCache() {
+        this.settingsCache.clear();
+        this.settingsCacheExpiry = 0;
+        console.log("\u{1F5D1}\uFE0F Settings cache cleared");
+      }
+      // Support Vouchers
+      async getAllSupportVouchers() {
+        const vouchers = await db.select().from(supportVouchers).orderBy(desc(supportVouchers.createdAt));
+        const vouchersWithDetails = await Promise.all(
+          vouchers.map(async (voucher) => {
+            const creator = await this.getUser(voucher.createdBy);
+            const recipients = await this.getVoucherRecipients(voucher.id);
+            return {
+              ...voucher,
+              creator,
+              recipients
+            };
+          })
+        );
+        return vouchersWithDetails;
+      }
+      // Optimized version to avoid N+1 queries for support vouchers
+      async getAllSupportVouchersOptimized() {
+        const vouchers = await db.select().from(supportVouchers).orderBy(desc(supportVouchers.createdAt));
+        const [allUsers, allFamilies, allRecipients] = await Promise.all([
+          this.getAllUsers(),
+          this.getAllFamilies(),
+          db.select().from(voucherRecipients)
+        ]);
+        const userMap = /* @__PURE__ */ new Map();
+        allUsers.forEach((user) => userMap.set(user.id, user));
+        const familyMap = /* @__PURE__ */ new Map();
+        allFamilies.forEach((family) => familyMap.set(family.id, family));
+        const recipientsByVoucherId = /* @__PURE__ */ new Map();
+        allRecipients.forEach((recipient) => {
+          const family = familyMap.get(recipient.familyId);
+          if (family) {
+            if (!recipientsByVoucherId.has(recipient.voucherId)) {
+              recipientsByVoucherId.set(recipient.voucherId, []);
+            }
+            recipientsByVoucherId.get(recipient.voucherId).push({ ...recipient, family });
+          }
+        });
+        const vouchersWithDetails = vouchers.map((voucher) => ({
           ...voucher,
-          creator,
-          recipients
-        };
-      })
-    );
-    return vouchersWithDetails;
-  }
-  async getSupportVoucher(id) {
-    const [supportVoucher] = await db.select().from(supportVouchers).where(eq(supportVouchers.id, id));
-    return supportVoucher || void 0;
-  }
-  async createSupportVoucher(voucher) {
-    const [createdVoucher] = await db.insert(supportVouchers).values(voucher).returning();
-    return createdVoucher;
-  }
-  async updateSupportVoucher(id, voucher) {
-    const [updatedVoucher] = await db.update(supportVouchers).set(voucher).where(eq(supportVouchers.id, id)).returning();
-    return updatedVoucher || void 0;
-  }
-  // Voucher Recipients
-  async getVoucherRecipients(voucherId) {
-    const recipients = await db.select().from(voucherRecipients).where(eq(voucherRecipients.voucherId, voucherId));
-    const recipientsWithFamilies = await Promise.all(
-      recipients.map(async (recipient) => {
-        const family = await this.getFamily(recipient.familyId);
-        return {
+          creator: userMap.get(voucher.createdBy),
+          recipients: recipientsByVoucherId.get(voucher.id) || []
+        }));
+        return vouchersWithDetails;
+      }
+      async getSupportVoucher(id) {
+        const [supportVoucher] = await db.select().from(supportVouchers).where(eq2(supportVouchers.id, id));
+        return supportVoucher || void 0;
+      }
+      async createSupportVoucher(voucher) {
+        const [createdVoucher] = await db.insert(supportVouchers).values(voucher).returning();
+        return createdVoucher;
+      }
+      async updateSupportVoucher(id, voucher) {
+        const [updatedVoucher] = await db.update(supportVouchers).set(voucher).where(eq2(supportVouchers.id, id)).returning();
+        return updatedVoucher || void 0;
+      }
+      // Voucher Recipients
+      async getVoucherRecipients(voucherId) {
+        const recipients = await db.select().from(voucherRecipients).where(eq2(voucherRecipients.voucherId, voucherId));
+        const recipientsWithFamilies = await Promise.all(
+          recipients.map(async (recipient) => {
+            const family = await this.getFamily(recipient.familyId);
+            return {
+              ...recipient,
+              family
+            };
+          })
+        );
+        return recipientsWithFamilies;
+      }
+      // Optimized version to avoid N+1 queries for voucher recipients
+      async getVoucherRecipientsOptimized(voucherId) {
+        const recipients = await db.select().from(voucherRecipients).where(eq2(voucherRecipients.voucherId, voucherId));
+        if (recipients.length === 0) return [];
+        const allFamilies = await this.getAllFamilies();
+        const familyMap = /* @__PURE__ */ new Map();
+        allFamilies.forEach((family) => familyMap.set(family.id, family));
+        const recipientsWithFamilies = recipients.map((recipient) => ({
           ...recipient,
-          family
-        };
-      })
-    );
-    return recipientsWithFamilies;
+          family: familyMap.get(recipient.familyId)
+        }));
+        return recipientsWithFamilies;
+      }
+      async createVoucherRecipient(recipient) {
+        const [createdRecipient] = await db.insert(voucherRecipients).values(recipient).returning();
+        return createdRecipient;
+      }
+      async updateVoucherRecipient(id, recipient) {
+        const [updatedRecipient] = await db.update(voucherRecipients).set(recipient).where(eq2(voucherRecipients.id, id)).returning();
+        return updatedRecipient || void 0;
+      }
+      async clearLogs() {
+        await db.delete(logs);
+      }
+      async clearNotifications() {
+        await db.delete(notifications);
+      }
+      async clearRequests() {
+        await db.delete(requests);
+      }
+      async clearMembers() {
+        await db.delete(members);
+      }
+      async clearFamilies() {
+        await db.delete(families2);
+      }
+      async clearUsers() {
+        await db.delete(users);
+      }
+      async clearWives() {
+        const result = await db.update(families2).set({
+          wifeName: null,
+          wifeID: null,
+          wifeBirthDate: null,
+          wifeJob: null,
+          wifePregnant: false
+        });
+        return (result?.rowCount ?? 0) > 0;
+      }
+      async clearSettings() {
+        await db.delete(settings);
+      }
+    };
+    storage = new DatabaseStorage();
   }
-  async createVoucherRecipient(recipient) {
-    const [createdRecipient] = await db.insert(voucherRecipients).values(recipient).returning();
-    return createdRecipient;
-  }
-  async updateVoucherRecipient(id, recipient) {
-    const [updatedRecipient] = await db.update(voucherRecipients).set(recipient).where(eq(voucherRecipients.id, id)).returning();
-    return updatedRecipient || void 0;
-  }
-  async clearLogs() {
-    await db.delete(logs);
-  }
-  async clearNotifications() {
-    await db.delete(notifications);
-  }
-  async clearRequests() {
-    await db.delete(requests);
-  }
-  async clearMembers() {
-    await db.delete(members);
-  }
-  async clearFamilies() {
-    await db.delete(families);
-  }
-  async clearUsers() {
-    await db.delete(users);
-  }
-  async clearSettings() {
-    await db.delete(settings);
-  }
-};
-var storage = new DatabaseStorage();
+});
 
 // src/auth.ts
-var scryptAsync = promisify(scrypt);
+import { scrypt, randomBytes, timingSafeEqual } from "crypto";
+import { promisify } from "util";
+import bcrypt from "bcryptjs";
 async function hashPassword(password) {
   const salt = randomBytes(16).toString("hex");
   const buf = await scryptAsync(password, salt, 64);
@@ -740,86 +1051,232 @@ async function comparePasswords(supplied, stored) {
   console.log(`\u274C Unknown password format: ${stored.substring(0, 10)}...`);
   return false;
 }
-function setupAuth(app2) {
-  const sessionSecret = process.env.SESSION_SECRET || "fallback-secret-for-development-only";
-  const isProduction = process.env.NODE_ENV === "production";
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-  const isHttps = frontendUrl.startsWith("https://") || process.env.NODE_ENV === "production";
-  const frontendHost = new URL(frontendUrl).hostname;
-  const isSameDomain = frontendHost === "localhost" || process.env.SAME_DOMAIN === "true";
-  const sessionSettings = {
-    secret: sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    store: storage.sessionStore,
-    cookie: {
-      secure: false,
-      // Only secure for HTTPS
-      httpOnly: false,
-      maxAge: 30 * 24 * 60 * 60 * 1e3,
-      // 30 days
-      sameSite: "lax"
-      // "lax" for same domain, "none" for cross-domain HTTPS
-    }
-  };
-  app2.set("trust proxy", 1);
-  app2.use(session2(sessionSettings));
-  app2.use(passport.initialize());
-  app2.use(passport.session());
-  passport.use(
-    new LocalStrategy(async (username, password, done) => {
-      console.log(`\u{1F510} Login attempt for username: ${username}`);
-      const user = await storage.getUserByUsername(username);
-      if (!user || user.deletedAt) {
-        console.log(`\u274C User not found or deleted: ${username}`);
-        return done(null, false);
-      }
-      console.log(`\u{1F50D} Found user: ${user.username}, role: ${user.role}`);
-      console.log(`\u{1F511} Stored password hash: ${user.password.substring(0, 20)}...`);
-      const passwordMatch = await comparePasswords(password, user.password);
-      console.log(`\u{1F512} Password comparison result: ${passwordMatch}`);
-      if (!passwordMatch) {
-        return done(null, false);
-      } else {
-        console.log(`\u2705 Login successful for: ${username}`);
-        return done(null, user);
-      }
-    })
+var scryptAsync;
+var init_auth = __esm({
+  "src/auth.ts"() {
+    "use strict";
+    scryptAsync = promisify(scrypt);
+  }
+});
+
+// src/jwt-auth.ts
+var jwt_auth_exports = {};
+__export(jwt_auth_exports, {
+  authMiddleware: () => authMiddleware,
+  generateToken: () => generateToken,
+  getCurrentUser: () => getCurrentUser,
+  loginHandler: () => loginHandler,
+  logoutHandler: () => logoutHandler,
+  verifyToken: () => verifyToken
+});
+import jwt from "jsonwebtoken";
+function generateToken(user) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is required");
+  }
+  return jwt.sign(
+    {
+      id: user.id,
+      username: user.username,
+      role: user.role
+    },
+    secret,
+    { expiresIn: "1h" }
   );
-  passport.serializeUser((user, done) => done(null, user.id));
-  passport.deserializeUser(async (id, done) => {
-    const user = await storage.getUser(id);
-    done(null, user);
-  });
-  app2.post("/api/register", async (req, res, next) => {
-    const existingUser = await storage.getUserByUsername(req.body.username);
-    if (existingUser) {
-      return res.status(400).send("\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0648\u062C\u0648\u062F \u0628\u0627\u0644\u0641\u0639\u0644");
-    }
-    const user = await storage.createUser({
-      ...req.body,
-      password: await hashPassword(req.body.password)
-    });
-    req.login(user, (err) => {
-      if (err) return next(err);
-      res.status(201).json(user);
-    });
-  });
-  app2.post("/api/logout", (req, res, next) => {
-    req.logout((err) => {
-      if (err) return next(err);
-      res.sendStatus(200);
-    });
-  });
-  app2.get("/api/user", (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
-    res.json(req.user);
-  });
 }
+function verifyToken(token) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is required");
+  }
+  return jwt.verify(token, secret);
+}
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: "No authorization header provided" });
+  }
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0] !== "Bearer") {
+    return res.status(401).json({ message: "Invalid authorization header format" });
+  }
+  const token = parts[1];
+  try {
+    const payload = verifyToken(token);
+    req.user = payload;
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+}
+async function loginHandler(req, res) {
+  try {
+    const { username, password } = req.body;
+    if (!password || password === "" || password === null || password === void 0) {
+      const user2 = await storage.getUserByUsername(username);
+      if (!user2) {
+        return res.status(401).json({ message: "\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u062E\u0627\u0637\u0626\u0629 - \u0631\u0627\u062C\u0639 \u0644\u062C\u0646\u0629 \u0627\u0644\u0639\u0627\u0626\u0644\u0629" });
+      }
+      const isPromotedHead = user2.role === "admin" && /^\d{9}$/.test(user2.username);
+      if (user2.role !== "head" && !isPromotedHead) {
+        return res.status(401).json({ message: "\u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644: \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629" });
+      }
+      if (user2.role === "head") {
+        const family = await storage.getFamilyByUserId(user2.id);
+        if (!family) {
+          return res.status(401).json({ message: "\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u062E\u0627\u0637\u0626\u0629 - \u0631\u0627\u062C\u0639 \u0644\u062C\u0646\u0629 \u0627\u0644\u0639\u0627\u0626\u0644\u0629" });
+        }
+      }
+      if (user2.lockoutUntil && /* @__PURE__ */ new Date() < user2.lockoutUntil) {
+        const remainingMinutes = Math.ceil((user2.lockoutUntil.getTime() - (/* @__PURE__ */ new Date()).getTime()) / (1e3 * 60));
+        return res.status(423).json({ message: `\u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u062D\u0638\u0648\u0631 \u0645\u0624\u0642\u062A\u0627\u064B. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${remainingMinutes} \u062F\u0642\u064A\u0642\u0629` });
+      }
+      await storage.updateUser(user2.id, {
+        failedLoginAttempts: 0,
+        lockoutUntil: null
+      });
+      const token2 = generateToken(user2);
+      return res.status(200).json({ token: token2, user: user2 });
+    }
+    const user = await storage.getUserByUsername(username);
+    if (!user) {
+      return res.status(401).json({ message: "\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u062E\u0627\u0637\u0626\u0629 - \u0631\u0627\u062C\u0639 \u0644\u062C\u0646\u0629 \u0627\u0644\u0639\u0627\u0626\u0644\u0629" });
+    }
+    if (user.lockoutUntil && /* @__PURE__ */ new Date() < user.lockoutUntil) {
+      const remainingMinutes = Math.ceil((user.lockoutUntil.getTime() - (/* @__PURE__ */ new Date()).getTime()) / (1e3 * 60));
+      return res.status(423).json({ message: `\u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u062D\u0638\u0648\u0631 \u0645\u0624\u0642\u062A\u0627\u064B. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${remainingMinutes} \u062F\u0642\u064A\u0642\u0629` });
+    }
+    const settings2 = await storage.getAllSettings();
+    const settingsMap = Object.fromEntries(settings2.map((s) => [s.key, s.value]));
+    const maxLoginAttempts = parseInt(settingsMap.maxLoginAttempts || "5");
+    const lockoutDuration = parseInt(settingsMap.lockoutDuration || "15");
+    const passwordMatch = await comparePasswords(password, user.password);
+    if (!passwordMatch) {
+      const newFailedAttempts = (user.failedLoginAttempts || 0) + 1;
+      let lockoutUntil = null;
+      if (newFailedAttempts >= maxLoginAttempts) {
+        lockoutUntil = new Date(Date.now() + lockoutDuration * 60 * 1e3);
+      }
+      await storage.updateUser(user.id, {
+        failedLoginAttempts: newFailedAttempts,
+        lockoutUntil
+      });
+      if (lockoutUntil) {
+        return res.status(423).json({ message: `\u062A\u0645 \u062D\u0638\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 \u0644\u0645\u062F\u0629 ${lockoutDuration} \u062F\u0642\u064A\u0642\u0629 \u0628\u0633\u0628\u0628 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0641\u0627\u0634\u0644\u0629 \u0627\u0644\u0645\u062A\u0643\u0631\u0631\u0629` });
+      } else {
+        const remainingAttempts = maxLoginAttempts - newFailedAttempts;
+        return res.status(401).json({ message: `\u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644: \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u062A\u0628\u0642\u064A\u0629: ${remainingAttempts}` });
+      }
+    }
+    await storage.updateUser(user.id, {
+      failedLoginAttempts: 0,
+      lockoutUntil: null
+    });
+    const token = generateToken(user);
+    res.status(200).json({ token, user });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+  }
+}
+async function getCurrentUser(req, res) {
+  if (!req.user) {
+    return res.status(401).json({ message: "Not authenticated" });
+  }
+  try {
+    const user = await storage.getUser(req.user.id);
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+  }
+}
+function logoutHandler(req, res) {
+  res.status(200).json({ message: "\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062E\u0631\u0648\u062C \u0628\u0646\u062C\u0627\u062D" });
+}
+var init_jwt_auth = __esm({
+  "src/jwt-auth.ts"() {
+    "use strict";
+    init_storage();
+    init_auth();
+  }
+});
+
+// package.json
+var require_package = __commonJS({
+  "package.json"(exports, module) {
+    module.exports = {
+      name: "family-management-backend",
+      version: "1.0.0",
+      type: "module",
+      license: "MIT",
+      scripts: {
+        dev: "cross-env NODE_ENV=development tsx src/index.ts",
+        build: "esbuild netlify/functions/api.ts --platform=node --packages=external --bundle --format=esm --outdir=netlify/functions && esbuild src/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+        start: "NODE_ENV=production node dist/index.js",
+        check: "tsc",
+        "db:push": "drizzle-kit push",
+        "db:migrate": "node ./migrate.js",
+        "db:generate": "drizzle-kit generate",
+        "db:drop-migrations": "rmdir /s /q migrations && mkdir migrations && (echo {} > migrations\\meta\\_journal.json)",
+        "db:reset": "npm run db:drop-migrations && npm run db:generate && npm run db:migrate",
+        "db:status": "drizzle-kit check",
+        "db:studio": "drizzle-kit studio",
+        seed: "tsx src/seed.ts",
+        "heroku-postbuild": "npm run build"
+      },
+      dependencies: {
+        "@neondatabase/serverless": "^0.10.4",
+        "@netlify/functions": "^2.8.1",
+        bcryptjs: "^3.0.2",
+        cors: "^2.8.5",
+        dotenv: "^17.2.1",
+        "drizzle-kit": "^0.30.4",
+        "drizzle-orm": "^0.39.1",
+        "drizzle-zod": "^0.7.0",
+        esbuild: "^0.25.0",
+        express: "^4.21.2",
+        jsonwebtoken: "^9.0.2",
+        multer: "^1.4.5-lts.1",
+        nanoid: "^5.1.5",
+        "serverless-http": "^3.2.0",
+        ws: "^8.18.0",
+        xlsx: "^0.18.5",
+        zod: "^3.24.2",
+        "zod-validation-error": "^3.4.0"
+      },
+      devDependencies: {
+        "@types/cors": "^2.8.17",
+        "@types/express": "4.17.21",
+        "@types/jsonwebtoken": "^9.0.10",
+        "@types/multer": "^1.4.12",
+        "@types/node": "^20.16.11",
+        "@types/ws": "^8.5.13",
+        tsx: "^4.19.1",
+        typescript: "5.6.3"
+      },
+      optionalDependencies: {
+        bufferutil: "^4.0.8"
+      }
+    };
+  }
+});
+
+// netlify/functions/api.ts
+import express from "express";
 
 // src/routes.ts
-import { z } from "zod";
-import passport2 from "passport";
+init_jwt_auth();
+init_auth();
+init_storage();
+init_schema();
+init_db();
+init_db_retry();
+import { createServer } from "http";
+import { z as z2 } from "zod";
 import multer from "multer";
 import cors from "cors";
 import pg2 from "pg";
@@ -840,6 +1297,31 @@ function getRequestTypeInArabic(type) {
 function isHeadOrDualRole(user, family) {
   return user.role === "head" || user.role === "admin" && family;
 }
+function getSpouseFieldName(headGender) {
+  if (!headGender || headGender === "male") {
+    return "wife";
+  } else if (headGender === "female") {
+    return "husband";
+  } else {
+    return "wife";
+  }
+}
+function getSpouseDataWithGenderLabel(family, headGender) {
+  const spouseFieldName = getSpouseFieldName(headGender);
+  if (!family.wifeName) {
+    return null;
+  }
+  return {
+    id: family.id,
+    familyId: family.id,
+    [`${spouseFieldName}Name`]: family.wifeName,
+    [`${spouseFieldName}ID`]: family.wifeID,
+    [`${spouseFieldName}BirthDate`]: family.wifeBirthDate,
+    [`${spouseFieldName}Job`]: family.wifeJob,
+    [`${spouseFieldName}Pregnant`]: family.wifePregnant,
+    createdAt: family.createdAt
+  };
+}
 async function getFamilyByIdOrDualRole(familyId) {
   let family = await storage.getFamily(familyId);
   if (!family) {
@@ -849,23 +1331,91 @@ async function getFamilyByIdOrDualRole(familyId) {
   return family;
 }
 function registerRoutes(app2) {
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-  console.log(`\u{1F527} CORS configuration for frontend: ${frontendUrl}`);
   app2.use(cors({
-    origin: frontendUrl,
-    credentials: true,
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: false,
+    // No longer need credentials for JWT
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Cookie", "Set-Cookie"],
-    exposedHeaders: ["Set-Cookie"]
+    allowedHeaders: ["Content-Type", "Authorization"]
   }));
-  setupAuth(app2);
-  app2.post("/api/admin/import-heads", upload.single("excel"), async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) {
+  app2.get("/", (req, res) => {
+    res.json({
+      message: "Family Management System API",
+      version: "1.0.0",
+      status: "running",
+      endpoints: {
+        auth: "/api/login, /api/logout, /api/user",
+        health: "/api/health",
+        settings: "/api/settings, /api/public/settings",
+        families: "/api/families, /api/family",
+        users: "/api/admin/users",
+        requests: "/api/requests",
+        notifications: "/api/notifications"
+      },
+      documentation: "Family management system backend API"
+    });
+  });
+  app2.get("/api", (req, res) => {
+    res.json({
+      message: "Family Management System API",
+      version: "1.0.0",
+      status: "running",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      availableEndpoints: [
+        "GET /api/health - System health check",
+        "POST /api/login - User authentication",
+        "POST /api/logout - User logout",
+        "GET /api/user - Get current user info",
+        "GET /api/settings - Get system settings (authenticated)",
+        "GET /api/public/settings - Get public settings",
+        "GET /api/families - Get families list (admin)",
+        "GET /api/family - Get family data",
+        "POST /api/family - Create family",
+        "PUT /api/family/:id - Update family",
+        "GET /api/requests - Get requests",
+        "POST /api/requests - Create request",
+        "GET /api/notifications - Get notifications"
+      ]
+    });
+  });
+  app2.post("/api/login", loginHandler);
+  app2.post("/api/logout", logoutHandler);
+  app2.get("/api/user", authMiddleware, getCurrentUser);
+  app2.get("/api/health", async (req, res) => {
+    try {
+      const dbHealth = await checkDatabaseHealth();
+      const health = {
+        status: dbHealth.healthy ? "healthy" : "unhealthy",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        database: {
+          healthy: dbHealth.healthy,
+          error: dbHealth.error || null
+        },
+        serverless: {
+          platform: "netlify-functions",
+          memory: process.memoryUsage(),
+          uptime: process.uptime()
+        }
+      };
+      if (dbHealth.healthy) {
+        res.status(200).json(health);
+      } else {
+        res.status(503).json(health);
+      }
+    } catch (error) {
+      console.error("Health check failed:", error);
+      res.status(503).json({
+        status: "error",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        error: error.message
+      });
+    }
+  });
+  app2.post("/api/admin/import-heads", authMiddleware, upload.single("excel"), async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) {
       console.log(`\u274C Unauthorized import attempt by user: ${req.user?.username || "anonymous"}`);
       return res.sendStatus(403);
     }
-    req.setTimeout(10 * 60 * 1e3);
-    res.setTimeout(10 * 60 * 1e3);
     console.log(`\u{1F4CA} Excel import started by user: ${req.user.username}`);
     try {
       if (!req.file) {
@@ -890,12 +1440,12 @@ function registerRoutes(app2) {
       let successCount = 0;
       let errorCount = 0;
       const errors = [];
+      console.log(`\u{1F4CA} Starting validation phase for ${data.length} rows...`);
+      const validRows = [];
+      const allHusbandIDs = /* @__PURE__ */ new Set();
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
         const rowIndex = i + 2;
-        if (i % 50 === 0) {
-          console.log(`\u{1F4CA} Processing row ${i + 1}/${data.length} (${Math.round(i / data.length * 100)}%)`);
-        }
         try {
           if (!row.husbandName || !row.husbandID) {
             errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0627\u0633\u0645 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629 \u0648\u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0645\u0637\u0644\u0648\u0628\u0627\u0646`);
@@ -903,53 +1453,105 @@ function registerRoutes(app2) {
             continue;
           }
           const husbandID = String(row.husbandID);
-          const existingUser = await storage.getUserByNationalId(husbandID);
-          if (existingUser) {
-            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u0645\u0633\u062C\u0644 \u0645\u0633\u0628\u0642\u0627\u064B`);
-            errorCount++;
-            continue;
-          }
           if (!/^\d{9}$/.test(husbandID)) {
             errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
             errorCount++;
             continue;
           }
-          const user = await storage.createUser({
-            username: husbandID,
-            password: await hashPassword(husbandID),
-            // Use ID as default password
-            role: "head",
-            phone: row.primaryPhone ? String(row.primaryPhone) : null
-          });
-          const familyData = {
-            userId: user.id,
-            husbandName: row.husbandName,
-            husbandID,
-            husbandBirthDate: row.husbandBirthDate || null,
-            husbandJob: row.husbandJob || null,
-            primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
-            secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
-            originalResidence: row.originalResidence || null,
-            currentHousing: row.currentHousing || null,
-            isDisplaced: Boolean(row.isDisplaced),
-            displacedLocation: row.displacedLocation || null,
-            isAbroad: Boolean(row.isAbroad),
-            warDamage2024: Boolean(row.warDamage2024),
-            warDamageDescription: row.warDamageDescription || null,
-            branch: row.branch || null,
-            landmarkNear: row.landmarkNear || null,
-            totalMembers: parseInt(String(row.totalMembers)) || 0,
-            numMales: parseInt(String(row.numMales)) || 0,
-            numFemales: parseInt(String(row.numFemales)) || 0,
-            socialStatus: row.socialStatus || null,
-            adminNotes: row.adminNotes || null
-          };
-          await storage.createFamily(familyData);
-          successCount++;
+          if (allHusbandIDs.has(husbandID)) {
+            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u0645\u0643\u0631\u0631 \u0641\u064A \u0627\u0644\u0645\u0644\u0641`);
+            errorCount++;
+            continue;
+          }
+          allHusbandIDs.add(husbandID);
+          validRows.push({ ...row, husbandID, rowIndex });
         } catch (error) {
-          console.error(`\u274C Error processing row ${rowIndex}:`, error.message);
+          console.error(`\u274C Error validating row ${rowIndex}:`, error.message);
           errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: ${error.message}`);
           errorCount++;
+        }
+      }
+      console.log(`\u{1F4CA} Validation complete: ${validRows.length} valid, ${errorCount} errors`);
+      console.log(`\u{1F4CA} Checking for existing users...`);
+      const existingFamilies = await storage.getAllFamilies();
+      const existingHusbandIDs = new Set(existingFamilies.map((f) => f.husbandID));
+      const finalValidRows = validRows.filter((row) => {
+        if (existingHusbandIDs.has(row.husbandID)) {
+          errors.push(`\u0627\u0644\u0635\u0641 ${row.rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${row.husbandID} \u0645\u0633\u062C\u0644 \u0645\u0633\u0628\u0642\u0627\u064B`);
+          errorCount++;
+          return false;
+        }
+        return true;
+      });
+      console.log(`\u{1F4CA} Final validation: ${finalValidRows.length} rows to process`);
+      const BATCH_SIZE = 50;
+      const batches = [];
+      for (let i = 0; i < finalValidRows.length; i += BATCH_SIZE) {
+        batches.push(finalValidRows.slice(i, i + BATCH_SIZE));
+      }
+      console.log(`\u{1F4CA} Processing ${batches.length} batches of ${BATCH_SIZE} rows each...`);
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        console.log(`\u{1F4CA} Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} rows)`);
+        try {
+          const batchPromises = batch.map(async (row) => {
+            try {
+              const user = await storage.createUser({
+                username: row.husbandID,
+                password: await hashPassword(row.husbandID),
+                role: "head",
+                gender: row.headGender || "male",
+                // Use gender from import data if available, default to 'male'
+                phone: row.primaryPhone ? String(row.primaryPhone) : null
+              });
+              const familyData = {
+                userId: user.id,
+                husbandName: row.husbandName,
+                husbandID: row.husbandID,
+                husbandBirthDate: row.husbandBirthDate || null,
+                husbandJob: row.husbandJob || null,
+                primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
+                secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
+                originalResidence: row.originalResidence || null,
+                currentHousing: row.currentHousing || null,
+                isDisplaced: Boolean(row.isDisplaced),
+                displacedLocation: row.displacedLocation || null,
+                isAbroad: Boolean(row.isAbroad),
+                warDamage2024: Boolean(row.warDamage2024),
+                warDamageDescription: row.warDamageDescription || null,
+                branch: row.branch || null,
+                landmarkNear: row.landmarkNear || null,
+                totalMembers: parseInt(String(row.totalMembers)) || 0,
+                numMales: parseInt(String(row.numMales)) || 0,
+                numFemales: parseInt(String(row.numFemales)) || 0,
+                socialStatus: row.socialStatus || null,
+                adminNotes: row.adminNotes || null
+              };
+              await storage.createFamily(familyData);
+              return { success: true, rowIndex: row.rowIndex };
+            } catch (error) {
+              console.error(`\u274C Error processing row ${row.rowIndex}:`, error.message);
+              return { success: false, rowIndex: row.rowIndex, error: error.message };
+            }
+          });
+          const batchResults = await Promise.all(batchPromises);
+          batchResults.forEach((result) => {
+            if (result.success) {
+              successCount++;
+            } else {
+              errors.push(`\u0627\u0644\u0635\u0641 ${result.rowIndex}: ${result.error}`);
+              errorCount++;
+            }
+          });
+          if (batchIndex < batches.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        } catch (batchError) {
+          console.error(`\u274C Batch ${batchIndex + 1} failed:`, batchError.message);
+          batch.forEach((row) => {
+            errors.push(`\u0627\u0644\u0635\u0641 ${row.rowIndex}: \u0641\u0634\u0644 \u0641\u064A \u0627\u0644\u0645\u0639\u0627\u0644\u062C\u0629 \u0627\u0644\u062C\u0645\u0627\u0639\u064A\u0629`);
+            errorCount++;
+          });
         }
       }
       const resultMessage = `\u062A\u0645 \u0627\u0633\u062A\u064A\u0631\u0627\u062F ${successCount} \u0639\u0627\u0626\u0644\u0629 \u0628\u0646\u062C\u0627\u062D\u060C \u0641\u0634\u0644 \u0641\u064A ${errorCount} \u0635\u0641`;
@@ -975,117 +1577,33 @@ function registerRoutes(app2) {
       res.status(500).json({ message: errorMessage });
     }
   });
-  app2.post("/api/login", async (req, res, next) => {
-    try {
-      const { username, password } = req.body;
-      if (!password || password === "" || password === null || password === void 0) {
-        const user2 = await storage.getUserByUsername(username);
-        if (!user2) {
-          return res.status(401).send("\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u062E\u0627\u0637\u0626\u0629 - \u0631\u0627\u062C\u0639 \u0644\u062C\u0646\u0629 \u0627\u0644\u0639\u0627\u0626\u0644\u0629");
-        }
-        const isPromotedHead = user2.role === "admin" && /^\d{9}$/.test(user2.username);
-        if (user2.role !== "head" && !isPromotedHead) {
-          return res.status(401).send("\u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644: \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629");
-        }
-        if (user2.role === "head") {
-          const family = await storage.getFamilyByUserId(user2.id);
-          if (!family) {
-            return res.status(401).send("\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u062E\u0627\u0637\u0626\u0629 - \u0631\u0627\u062C\u0639 \u0644\u062C\u0646\u0629 \u0627\u0644\u0639\u0627\u0626\u0644\u0629");
-          }
-        }
-        if (user2.lockoutUntil && /* @__PURE__ */ new Date() < user2.lockoutUntil) {
-          const remainingMinutes = Math.ceil((user2.lockoutUntil.getTime() - (/* @__PURE__ */ new Date()).getTime()) / (1e3 * 60));
-          return res.status(423).send(`\u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u062D\u0638\u0648\u0631 \u0645\u0624\u0642\u062A\u0627\u064B. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${remainingMinutes} \u062F\u0642\u064A\u0642\u0629`);
-        }
-        await storage.updateUser(user2.id, {
-          failedLoginAttempts: 0,
-          lockoutUntil: null
-        });
-        req.login(user2, (err) => {
-          if (err) return next(err);
-          console.log(`\u2705 Login successful - Session ID: ${req.sessionID}`);
-          console.log(`\u2705 Login successful - User: ${user2.username}, Role: ${user2.role}`);
-          console.log(`\u2705 Login successful - Is authenticated: ${req.isAuthenticated()}`);
-          res.status(200).json(user2);
-        });
-        return;
-      }
-      const user = await storage.getUserByUsername(username);
-      if (!user) {
-        return res.status(401).send("\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u062E\u0627\u0637\u0626\u0629 - \u0631\u0627\u062C\u0639 \u0644\u062C\u0646\u0629 \u0627\u0644\u0639\u0627\u0626\u0644\u0629");
-      }
-      if (user.lockoutUntil && /* @__PURE__ */ new Date() < user.lockoutUntil) {
-        const remainingMinutes = Math.ceil((user.lockoutUntil.getTime() - (/* @__PURE__ */ new Date()).getTime()) / (1e3 * 60));
-        return res.status(423).send(`\u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u062D\u0638\u0648\u0631 \u0645\u0624\u0642\u062A\u0627\u064B. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${remainingMinutes} \u062F\u0642\u064A\u0642\u0629`);
-      }
-      const settings2 = await storage.getAllSettings();
-      const settingsMap = Object.fromEntries(settings2.map((s) => [s.key, s.value]));
-      const maxLoginAttempts = parseInt(settingsMap.maxLoginAttempts || "5");
-      const lockoutDuration = parseInt(settingsMap.lockoutDuration || "15");
-      passport2.authenticate("local", async (err, authenticatedUser, info) => {
-        if (err) return next(err);
-        if (!authenticatedUser) {
-          const newFailedAttempts = (user.failedLoginAttempts || 0) + 1;
-          let lockoutUntil = null;
-          if (newFailedAttempts >= maxLoginAttempts) {
-            lockoutUntil = new Date(Date.now() + lockoutDuration * 60 * 1e3);
-          }
-          await storage.updateUser(user.id, {
-            failedLoginAttempts: newFailedAttempts,
-            lockoutUntil
-          });
-          if (lockoutUntil) {
-            return res.status(423).send(`\u062A\u0645 \u062D\u0638\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 \u0644\u0645\u062F\u0629 ${lockoutDuration} \u062F\u0642\u064A\u0642\u0629 \u0628\u0633\u0628\u0628 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0641\u0627\u0634\u0644\u0629 \u0627\u0644\u0645\u062A\u0643\u0631\u0631\u0629`);
-          } else {
-            const remainingAttempts = maxLoginAttempts - newFailedAttempts;
-            return res.status(401).send(`\u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644: \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629. \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u062A\u0628\u0642\u064A\u0629: ${remainingAttempts}`);
-          }
-        }
-        await storage.updateUser(user.id, {
-          failedLoginAttempts: 0,
-          lockoutUntil: null
-        });
-        req.login(authenticatedUser, (err2) => {
-          if (err2) return next(err2);
-          console.log(`\u2705 Login successful - Session ID: ${req.sessionID}`);
-          console.log(`\u2705 Login successful - User: ${authenticatedUser.username}, Role: ${authenticatedUser.role}`);
-          console.log(`\u2705 Login successful - Is authenticated: ${req.isAuthenticated()}`);
-          res.status(200).json(authenticatedUser);
-        });
-      })(req, res, next);
-    } catch (error) {
-      console.error("Login error:", error);
-      res.status(500).send("\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645");
-    }
-  });
-  app2.get("/api/family", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/family", authMiddleware, async (req, res) => {
     try {
       const family = await storage.getFamilyByUserId(req.user.id);
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
-      const wives2 = await storage.getWivesByFamilyId(family.id);
+      const user = await storage.getUser(req.user.id);
+      const spouse = family.wifeName ? getSpouseDataWithGenderLabel(family, user?.gender || null) : null;
       const members2 = await storage.getMembersByFamilyId(family.id);
-      res.json({ ...family, wives: wives2, members: members2 });
+      const orphans3 = await storage.getOrphansByFamilyId(family.id);
+      res.json({ ...family, spouse, members: members2, orphans: orphans3, userGender: user?.gender });
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/family", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.post("/api/family", authMiddleware, async (req, res) => {
     try {
       const familyData = insertFamilySchema.parse(req.body);
       familyData.userId = req.user.id;
       const family = await storage.createFamily(familyData);
       res.status(201).json(family);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.put("/api/family/:id", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.put("/api/family/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const familyData = insertFamilySchema.partial().parse(req.body);
@@ -1099,14 +1617,13 @@ function registerRoutes(app2) {
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       res.json(family);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/family/:familyId/members", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/family/:familyId/members", authMiddleware, async (req, res) => {
     try {
       const familyId = parseInt(req.params.familyId);
       const family = await storage.getFamily(familyId);
@@ -1120,8 +1637,7 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/members", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.post("/api/members", authMiddleware, async (req, res) => {
     try {
       const family = await storage.getFamilyByUserId(req.user.id);
       if (!family) {
@@ -1137,14 +1653,13 @@ function registerRoutes(app2) {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
       }
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.put("/api/members/:id", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.put("/api/members/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const memberData = insertMemberSchema.partial().parse(req.body);
@@ -1159,14 +1674,13 @@ function registerRoutes(app2) {
       if (!updatedMember) return res.status(404).json({ message: "\u0627\u0644\u0641\u0631\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
       res.json(updatedMember);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.delete("/api/members/:id", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.delete("/api/members/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       console.log("Server: Attempting to delete member with ID:", id);
@@ -1203,8 +1717,7 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/family/:familyId/wives", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/family/:familyId/orphans", authMiddleware, async (req, res) => {
     try {
       const familyId = parseInt(req.params.familyId);
       const family = await storage.getFamily(familyId);
@@ -1212,78 +1725,202 @@ function registerRoutes(app2) {
       if (isHeadOrDualRole(req.user, family) && family.userId !== req.user.id) {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
       }
-      const wives2 = await storage.getWivesByFamilyId(familyId);
-      res.json(wives2);
+      const orphans3 = await storage.getOrphansByFamilyId(familyId);
+      res.json(orphans3);
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/wives", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.post("/api/orphans", authMiddleware, async (req, res) => {
     try {
       const family = await storage.getFamilyByUserId(req.user.id);
       if (!family) {
         return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       }
       if (isHeadOrDualRole(req.user, family)) {
-        const wifeDataSchema = insertWifeSchema.omit({ familyId: true });
-        const parsedData = wifeDataSchema.parse(req.body);
-        const wifeData = { ...parsedData, familyId: family.id };
-        const wife = await storage.createWife(wifeData);
-        res.status(201).json(wife);
+        const orphanDataSchema = insertOrphanSchema.omit({ familyId: true });
+        const parsedData = orphanDataSchema.parse(req.body);
+        const orphanData = { ...parsedData, familyId: family.id };
+        const orphan = await storage.createOrphan(orphanData);
+        res.status(201).json(orphan);
       } else {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
       }
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.put("/api/wives/:id", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.put("/api/orphans/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const wifeData = insertWifeSchema.partial().parse(req.body);
-      const wife = await storage.getWife(id);
-      if (!wife) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
-      const family = await storage.getFamily(wife.familyId);
+      const orphanData = insertOrphanSchema.partial().extend({
+        orphanID: z2.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u064A\u062A\u064A\u0645 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645").optional(),
+        guardianID: z2.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0648\u0635\u064A \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645").optional(),
+        fatherID: z2.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0627\u0628 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645").optional(),
+        mobileNumber: z2.string().regex(/^\d{10}$/, "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 10 \u0623\u0631\u0642\u0627\u0645").optional(),
+        backupMobileNumber: z2.string().regex(/^\d{10}$/, "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 10 \u0623\u0631\u0642\u0627\u0645").optional(),
+        martyrdomType: z2.enum(["war_2023", "pre_2023_war", "natural_death"]).optional()
+      }).parse(req.body);
+      const orphan = await storage.getOrphan(id);
+      if (!orphan) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      const family = await storage.getFamily(orphan.familyId);
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       if (isHeadOrDualRole(req.user, family) && family.userId !== req.user.id) {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
       }
-      const updatedWife = await storage.updateWife(id, wifeData);
-      if (!updatedWife) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
-      res.json(updatedWife);
+      const updatedOrphan = await storage.updateOrphan(id, orphanData);
+      if (!updatedOrphan) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      res.json(updatedOrphan);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.delete("/api/wives/:id", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.delete("/api/orphans/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const wife = await storage.getWife(id);
-      if (!wife) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
-      const family = await storage.getFamily(wife.familyId);
+      console.log("Server: Attempting to delete orphan with ID:", id);
+      console.log("Server: ID type:", typeof id);
+      if (req.user.role === "head") {
+        const orphan = await storage.getOrphan(id);
+        console.log("Server: Found orphan:", orphan);
+        if (!orphan) {
+          console.log("Server: Orphan not found for ID:", id);
+          return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+        }
+        const family = await storage.getFamily(orphan.familyId);
+        console.log("Server: Found family:", family);
+        if (!family || family.userId !== req.user.id) {
+          console.log("Server: Forbidden - family not found or user mismatch");
+          return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
+        }
+        const success = await storage.deleteOrphan(id);
+        console.log("Server: Delete result:", success);
+        if (!success) {
+          console.log("Server: Delete failed for ID:", id);
+          return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+        }
+        res.sendStatus(204);
+      } else {
+        const success = await storage.deleteOrphan(id);
+        if (!success) {
+          return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+        }
+        res.sendStatus(204);
+      }
+    } catch (error) {
+      console.error("Server: Error deleting orphan:", error);
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.get("/api/family/:familyId/spouse", authMiddleware, async (req, res) => {
+    try {
+      const familyId = parseInt(req.params.familyId);
+      const family = await storage.getFamily(familyId);
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       if (isHeadOrDualRole(req.user, family) && family.userId !== req.user.id) {
         return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
       }
-      const success = await storage.deleteWife(id);
-      if (!success) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      const user = await storage.getUser(family.userId);
+      const spouseData = family.wifeName ? getSpouseDataWithGenderLabel(family, user?.gender || null) : null;
+      res.json(spouseData);
+    } catch (error) {
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.post("/api/family/:familyId/spouse", authMiddleware, async (req, res) => {
+    try {
+      const familyId = parseInt(req.params.familyId);
+      const family = await storage.getFamily(familyId);
+      if (!family) {
+        return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      }
+      if (isHeadOrDualRole(req.user, family) && family.userId !== req.user.id) {
+        return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
+      }
+      if (family.wifeName) {
+        return res.status(409).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u0645\u0648\u062C\u0648\u062F/\u0629 \u0645\u0633\u0628\u0642\u0627\u064B \u0644\u0647\u0630\u0647 \u0627\u0644\u0639\u0627\u0626\u0644\u0629" });
+      }
+      const { spouseName, spouseID, spouseBirthDate, spouseJob, spousePregnant } = req.body;
+      const updatedFamily = await storage.updateFamily(familyId, {
+        wifeName: spouseName,
+        wifeID: spouseID,
+        wifeBirthDate: spouseBirthDate,
+        wifeJob: spouseJob,
+        wifePregnant: spousePregnant || false
+      });
+      if (!updatedFamily) {
+        return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      }
+      const user = await storage.getUser(family.userId);
+      const spouseData = getSpouseDataWithGenderLabel(updatedFamily, user?.gender || null);
+      res.status(201).json(spouseData);
+    } catch (error) {
+      if (error instanceof z2.ZodError) {
+        return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
+      }
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.put("/api/family/:familyId/spouse", authMiddleware, async (req, res) => {
+    try {
+      const familyId = parseInt(req.params.familyId);
+      const family = await storage.getFamily(familyId);
+      if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      if (isHeadOrDualRole(req.user, family) && family.userId !== req.user.id) {
+        return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
+      }
+      if (!family.wifeName) {
+        return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F/\u0629" });
+      }
+      const { spouseName, spouseID, spouseBirthDate, spouseJob, spousePregnant } = req.body;
+      const updatedFamily = await storage.updateFamily(familyId, {
+        wifeName: spouseName !== void 0 ? spouseName : family.wifeName,
+        wifeID: spouseID !== void 0 ? spouseID : family.wifeID,
+        wifeBirthDate: spouseBirthDate !== void 0 ? spouseBirthDate : family.wifeBirthDate,
+        wifeJob: spouseJob !== void 0 ? spouseJob : family.wifeJob,
+        wifePregnant: spousePregnant !== void 0 ? spousePregnant : family.wifePregnant
+      });
+      if (!updatedFamily) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F/\u0629" });
+      const user = await storage.getUser(family.userId);
+      const spouseData = getSpouseDataWithGenderLabel(updatedFamily, user?.gender || null);
+      res.json(spouseData);
+    } catch (error) {
+      if (error instanceof z2.ZodError) {
+        return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
+      }
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.delete("/api/family/:familyId/spouse", authMiddleware, async (req, res) => {
+    try {
+      const familyId = parseInt(req.params.familyId);
+      const family = await storage.getFamily(familyId);
+      if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      if (isHeadOrDualRole(req.user, family) && family.userId !== req.user.id) {
+        return res.status(403).json({ message: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643" });
+      }
+      if (!family.wifeName) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F/\u0629" });
+      const result = await db.update(families).set({
+        wifeName: null,
+        wifeID: null,
+        wifeBirthDate: null,
+        wifeJob: null,
+        wifePregnant: false
+      }).where(eq(families.id, familyId));
+      if (result.rowCount === 0) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F/\u0629" });
       res.sendStatus(204);
     } catch (error) {
-      console.error("Server: Error deleting wife:", error);
+      console.error("Server: Error deleting spouse:", error);
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/requests", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/requests", authMiddleware, async (req, res) => {
     try {
       const family = await storage.getFamilyByUserId(req.user.id);
       if (isHeadOrDualRole(req.user, family)) {
@@ -1291,21 +1928,14 @@ function registerRoutes(app2) {
         const requests2 = await storage.getRequestsByFamilyId(family.id);
         res.json(requests2);
       } else {
-        const requests2 = await storage.getAllRequests();
-        const requestsWithFamily = await Promise.all(
-          requests2.map(async (request) => {
-            const family2 = await getFamilyByIdOrDualRole(request.familyId);
-            return { ...request, family: family2 };
-          })
-        );
+        const requestsWithFamily = await storage.getAllRequestsWithFamilies();
         res.json(requestsWithFamily);
       }
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/requests", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.post("/api/requests", authMiddleware, async (req, res) => {
     try {
       let requestData;
       const family = await storage.getFamilyByUserId(req.user.id);
@@ -1320,14 +1950,14 @@ function registerRoutes(app2) {
       const request = await storage.createRequest(requestData);
       res.status(201).json(request);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.put("/api/requests/:id", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.put("/api/requests/:id", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const requestData = insertRequestSchema.partial().parse(req.body);
@@ -1365,14 +1995,13 @@ function registerRoutes(app2) {
       }
       res.json(request);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/notifications", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/notifications", authMiddleware, async (req, res) => {
     try {
       let notifications2 = await storage.getAllNotifications();
       if (req.user.role === "head") {
@@ -1385,8 +2014,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/notifications", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.post("/api/notifications", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       let notificationData = insertNotificationSchema.parse(req.body);
       if (notificationData.target === "admin") {
@@ -1400,37 +2029,45 @@ function registerRoutes(app2) {
       const notification = await storage.createNotification(notificationData);
       res.status(201).json(notification);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/admin/families", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.get("/api/admin/families", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
-      const families2 = await storage.getAllFamiliesWithMembers();
-      res.json(families2);
+      const families3 = await storage.getAllFamiliesWithMembersOptimized();
+      const familiesWithGenderAppropriateSpouse = await Promise.all(families3.map(async (family) => {
+        const user = await storage.getUser(family.userId);
+        const spouse = family.wifeName ? getSpouseDataWithGenderLabel(family, user?.gender || null) : null;
+        return { ...family, spouse, userGender: user?.gender };
+      }));
+      res.json(familiesWithGenderAppropriateSpouse);
     } catch (error) {
+      console.error("Families endpoint error:", error);
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/admin/families/:id", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.get("/api/admin/families/:id", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const family = await getFamilyByIdOrDualRole(id);
       if (!family) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
-      const wives2 = await storage.getWivesByFamilyId(family.id);
+      const user = await storage.getUser(family.userId);
+      const spouse = family.wifeName ? getSpouseDataWithGenderLabel(family, user?.gender || null) : null;
       const members2 = await storage.getMembersByFamilyId(family.id);
+      const orphans3 = await storage.getOrphansByFamilyId(family.id);
       const requests2 = await storage.getRequestsByFamilyId(family.id);
-      res.json({ ...family, wives: wives2, members: members2, requests: requests2 });
+      res.json({ ...family, spouse, members: members2, orphans: orphans3, requests: requests2, userGender: user?.gender });
     } catch (error) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.put("/api/admin/families/:id", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.put("/api/admin/families/:id", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const familyData = insertFamilySchema.partial().parse(req.body);
@@ -1440,14 +2077,14 @@ function registerRoutes(app2) {
       if (!updatedFamily) return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       res.json(updatedFamily);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.delete("/api/admin/families/:id", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.delete("/api/admin/families/:id", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const success = await storage.deleteFamily(id);
@@ -1457,8 +2094,80 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/admin/families/:id/members", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.get("/api/admin/orphans", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
+    try {
+      const orphans3 = await storage.getAllOrphans();
+      const orphansWithFamily = await Promise.all(orphans3.map(async (orphan) => {
+        try {
+          const family = await storage.getFamily(orphan.familyId);
+          const orphansUnder18Count = await storage.getOrphansCountUnder18ByFamilyId(orphan.familyId);
+          return {
+            ...orphan,
+            family: family ? {
+              husbandName: family.husbandName,
+              husbandID: family.husbandID,
+              primaryPhone: family.primaryPhone
+            } : null,
+            orphansUnder18Count
+          };
+        } catch (familyError) {
+          console.error(`Error getting family for orphan ${orphan.id} with familyId ${orphan.familyId}:`, familyError);
+          const orphansUnder18Count = await storage.getOrphansCountUnder18ByFamilyId(orphan.familyId);
+          return {
+            ...orphan,
+            family: null,
+            orphansUnder18Count
+          };
+        }
+      }));
+      res.json(orphansWithFamily);
+    } catch (error) {
+      console.error("Admin orphans endpoint error:", error);
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.post("/api/admin/orphans", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
+    try {
+      const orphanData = insertOrphanSchema.parse(req.body);
+      const orphan = await storage.createOrphan(orphanData);
+      res.status(201).json(orphan);
+    } catch (error) {
+      if (error instanceof z2.ZodError) {
+        return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
+      }
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.put("/api/admin/orphans/:id", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
+    try {
+      const id = parseInt(req.params.id);
+      const orphanData = insertOrphanSchema.partial().parse(req.body);
+      const orphan = await storage.updateOrphan(id, orphanData);
+      if (!orphan) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      res.json(orphan);
+    } catch (error) {
+      if (error instanceof z2.ZodError) {
+        return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
+      }
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.delete("/api/admin/orphans/:id", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
+    try {
+      const id = parseInt(req.params.id);
+      const success = await storage.deleteOrphan(id);
+      if (!success) return res.status(404).json({ message: "\u0627\u0644\u064A\u062A\u064A\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      res.sendStatus(204);
+    } catch (error) {
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.post("/api/admin/families/:id/members", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       const familyId = parseInt(req.params.id);
       const family = await getFamilyByIdOrDualRole(familyId);
@@ -1467,7 +2176,7 @@ function registerRoutes(app2) {
       const member = await storage.createMember(memberData);
       res.status(201).json(member);
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
@@ -1484,6 +2193,8 @@ function registerRoutes(app2) {
         username: familyData.husbandID,
         password: userData.password ? await hashPassword(userData.password) : await hashPassword(familyData.husbandID),
         role: "head",
+        gender: userData.gender || "male",
+        // Add gender field, default to 'male' for backward compatibility
         phone: familyData.primaryPhone
       });
       const family = await storage.createFamily({
@@ -1499,10 +2210,14 @@ function registerRoutes(app2) {
         }
       }
       if (userData.password) {
-        req.login(user, (err) => {
-          if (err) return res.status(500).json({ message: "\u062A\u0645 \u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0628\u0646\u062C\u0627\u062D \u0644\u0643\u0646 \u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644" });
-          res.status(201).json({ user, family });
-        });
+        try {
+          const { generateToken: generateToken2 } = await Promise.resolve().then(() => (init_jwt_auth(), jwt_auth_exports));
+          const token = generateToken2(user);
+          res.status(201).json({ token, user, family });
+        } catch (err) {
+          console.error("Token generation error:", err);
+          return res.status(500).json({ message: "\u062A\u0645 \u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0628\u0646\u062C\u0627\u062D \u0644\u0643\u0646 \u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644" });
+        }
       } else {
         res.status(201).json({ user, family });
       }
@@ -1514,8 +2229,7 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/user/profile", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/user/profile", authMiddleware, async (req, res) => {
     try {
       const user = await storage.getUser(req.user.id);
       if (!user) return res.status(404).json({ message: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
@@ -1525,8 +2239,21 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/user/password", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.put("/api/user/profile", authMiddleware, async (req, res) => {
+    try {
+      const { gender } = req.body;
+      if (gender && !["male", "female", "other"].includes(gender)) {
+        return res.status(400).json({ message: "\u0627\u0644\u062C\u0646\u0633 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" });
+      }
+      const user = await storage.updateUser(req.user.id, { gender });
+      if (!user) return res.status(404).json({ message: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      const { password, ...userData } = user;
+      res.json(userData);
+    } catch (error) {
+      res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
+    }
+  });
+  app2.post("/api/user/password", authMiddleware, async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: "\u0627\u0644\u0631\u062C\u0627\u0621 \u0625\u062F\u062E\u0627\u0644 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u0648\u0627\u0644\u062C\u062F\u064A\u062F\u0629" });
@@ -1546,8 +2273,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062D\u062F\u062B \u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" });
     }
   });
-  app2.get("/api/admin/users", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role === "head") return res.sendStatus(403);
+  app2.get("/api/admin/users", authMiddleware, async (req, res) => {
+    if (req.user.role === "head") return res.sendStatus(403);
     try {
       const users2 = await storage.getAllUsers({ includeDeleted: true });
       res.json(users2);
@@ -1555,8 +2282,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/admin/users", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/admin/users", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       let userData = req.body;
       if (userData.password) {
@@ -1588,7 +2315,7 @@ function registerRoutes(app2) {
         }
         userData.password = await hashPassword(userData.password);
       }
-      const allowedFields = ["username", "password", "role", "phone", "isProtected", "identityId"];
+      const allowedFields = ["username", "password", "role", "phone", "gender", "isProtected", "identityId"];
       userData = Object.fromEntries(Object.entries(userData).filter(([k]) => allowedFields.includes(k)));
       const user = await storage.createUser(userData);
       res.status(201).json(user);
@@ -1596,8 +2323,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.put("/api/admin/users/:id", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
+  app2.put("/api/admin/users/:id", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       let userData = req.body;
@@ -1645,21 +2372,21 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.delete("/api/admin/users/:id", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
+  app2.delete("/api/admin/users/:id", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const targetUser = await storage.getUser(id);
       if (!targetUser) return res.status(404).json({ message: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
-      const families2 = await storage.getFamiliesByUserId(id);
-      const hasFamilies = families2 && families2.length > 0;
+      const families3 = await storage.getFamiliesByUserId(id);
+      const hasFamilies = families3 && families3.length > 0;
       const cascade = req.query.cascade === "true";
       const hard = req.query.hard === "true";
       if (hasFamilies && !cascade) {
         return res.status(409).json({
           message: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0644\u0623\u0646\u0647 \u0645\u0631\u062A\u0628\u0637 \u0628\u0639\u0627\u0626\u0644\u0627\u062A. \u064A\u0645\u0643\u0646\u0643 \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u062D\u0630\u0641 \u0627\u0644\u0645\u062A\u0633\u0644\u0633\u0644 \u0644\u062D\u0630\u0641 \u062C\u0645\u064A\u0639 \u0627\u0644\u0639\u0627\u0626\u0644\u0627\u062A \u0648\u0627\u0644\u0623\u0641\u0631\u0627\u062F \u0627\u0644\u0645\u0631\u062A\u0628\u0637\u064A\u0646 \u0628\u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645.",
           code: "USER_REFERENCED_IN_FAMILY",
-          families: families2.map((f) => ({ id: f.id, husbandName: f.husbandName, husbandID: f.husbandID }))
+          families: families3.map((f) => ({ id: f.id, husbandName: f.husbandName, husbandID: f.husbandID }))
         });
       }
       if (req.user.role === "root") {
@@ -1667,7 +2394,7 @@ function registerRoutes(app2) {
           return res.status(403).json({ message: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u062D\u0633\u0627\u0628\u0643 \u0627\u0644\u062E\u0627\u0635" });
         }
         if (hasFamilies && cascade) {
-          for (const family of families2) {
+          for (const family of families3) {
             await storage.deleteFamily(family.id);
           }
         }
@@ -1694,7 +2421,7 @@ function registerRoutes(app2) {
           }
         }
         if (hasFamilies && cascade) {
-          for (const family of families2) {
+          for (const family of families3) {
             await storage.deleteFamily(family.id);
           }
         }
@@ -1707,8 +2434,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/admin/users/:id/reset-lockout", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
+  app2.post("/api/admin/users/:id/reset-lockout", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const targetUser = await storage.getUser(id);
@@ -1741,8 +2468,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/admin/users/:id/restore", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/admin/users/:id/restore", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
       const user = await storage.getUser(id, { includeDeleted: true });
@@ -1754,8 +2481,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/admin/logs", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
+  app2.get("/api/admin/logs", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
     try {
       const { page = 1, pageSize = 20, type, userId, search } = req.query;
       const limit = Math.max(1, Math.min(Number(pageSize) || 20, 100));
@@ -1775,8 +2502,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/admin/logs", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
+  app2.post("/api/admin/logs", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root" && req.user.role !== "admin") return res.sendStatus(403);
     try {
       const logData = req.body;
       logData.userId = req.user.id;
@@ -1786,8 +2513,7 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/settings", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/settings", authMiddleware, async (req, res) => {
     try {
       const allSettings = await storage.getAllSettings();
       const settingsMap = Object.fromEntries(allSettings.map((s) => [s.key, s.value]));
@@ -1805,8 +2531,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/settings", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/settings", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       const { key, value, description } = req.body;
       if (!key || value === void 0) {
@@ -1818,8 +2544,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/settings/bulk", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/settings/bulk", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       const { settings: settings2 } = req.body;
       if (!settings2 || typeof settings2 !== "object") {
@@ -1894,6 +2620,7 @@ function registerRoutes(app2) {
           failures.push({ key, error: settingError.message });
         }
       }
+      storage.clearSettingsCache();
       if (failures.length === 0) {
         res.json({ message: `\u062A\u0645 \u062D\u0641\u0638 \u062C\u0645\u064A\u0639 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0628\u0646\u062C\u0627\u062D (${successCount} \u0625\u0639\u062F\u0627\u062F)` });
       } else {
@@ -1907,8 +2634,7 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/settings/:key", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.get("/api/settings/:key", authMiddleware, async (req, res) => {
     try {
       const value = await storage.getSetting(req.params.key);
       if (value === void 0) {
@@ -1927,8 +2653,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/settings/maintenance", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/settings/maintenance", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       const { enabled } = req.body;
       await storage.setSetting("maintenance", enabled ? "true" : "false", "\u0648\u0636\u0639 \u0627\u0644\u0635\u064A\u0627\u0646\u0629");
@@ -1945,8 +2671,7 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u0641\u0634\u0644 \u0641\u064A \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0625\u0635\u062F\u0627\u0631" });
     }
   });
-  app2.post("/api/change-password", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app2.post("/api/change-password", authMiddleware, async (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body;
       if (!currentPassword || !newPassword) {
@@ -1989,30 +2714,71 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" });
     }
   });
-  app2.get("/api/admin/backup", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.get("/api/admin/backup", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
-      const users2 = await storage.getAllUsers();
-      const families2 = await storage.getAllFamilies();
-      const members2 = [];
-      for (const family of families2) {
-        const famMembers = await storage.getMembersByFamilyId(family.id);
-        members2.push(...famMembers);
-      }
-      const requests2 = await storage.getAllRequests();
-      const notifications2 = await storage.getAllNotifications();
-      const settings2 = await storage.getAllSettings();
-      const logs2 = await storage.getLogs({});
-      const backup = { users: users2, families: families2, members: members2, requests: requests2, notifications: notifications2, settings: settings2, logs: logs2 };
+      console.log("Starting database backup...");
       res.setHeader("Content-Disposition", `attachment; filename=backup-${Date.now()}.json`);
       res.setHeader("Content-Type", "application/json");
-      res.send(JSON.stringify(backup, null, 2));
+      res.setHeader("Transfer-Encoding", "chunked");
+      res.write("{\n");
+      let isFirst = true;
+      const writeSection = (key, data) => {
+        if (!isFirst) res.write(",\n");
+        res.write(`  "${key}": ${JSON.stringify(data, null, 2)}`);
+        isFirst = false;
+      };
+      console.log("\u{1F4CA} Backing up users...");
+      const users2 = await storage.getAllUsers();
+      writeSection("users", users2);
+      console.log(`\u2705 Users: ${users2.length} records`);
+      console.log("\u{1F4CA} Backing up families...");
+      const families3 = await storage.getAllFamilies();
+      writeSection("families", families3);
+      console.log(`\u2705 Families: ${families3.length} records`);
+      console.log("\u{1F4CA} Backing up members...");
+      const allMembers = [];
+      const BATCH_SIZE = 1e3;
+      let offset = 0;
+      let memberBatch;
+      do {
+        memberBatch = await db.select().from(members).limit(BATCH_SIZE).offset(offset);
+        allMembers.push(...memberBatch);
+        offset += BATCH_SIZE;
+        console.log(`\u{1F4CA} Loaded ${allMembers.length} members so far...`);
+      } while (memberBatch.length === BATCH_SIZE);
+      writeSection("members", allMembers);
+      console.log(`\u2705 Members: ${allMembers.length} records`);
+      console.log("\u{1F4CA} Backing up requests...");
+      const requests2 = await storage.getAllRequests();
+      writeSection("requests", requests2);
+      console.log(`\u2705 Requests: ${requests2.length} records`);
+      console.log("\u{1F4CA} Backing up notifications...");
+      const notifications2 = await storage.getAllNotifications();
+      writeSection("notifications", notifications2);
+      console.log(`\u2705 Notifications: ${notifications2.length} records`);
+      console.log("\u{1F4CA} Backing up settings...");
+      const settings2 = await storage.getAllSettings();
+      writeSection("settings", settings2);
+      console.log(`\u2705 Settings: ${settings2.length} records`);
+      console.log("\u{1F4CA} Backing up logs...");
+      const logs2 = await storage.getLogs({ limit: 1e4 });
+      writeSection("logs", logs2);
+      console.log(`\u2705 Logs: ${logs2.length} records`);
+      res.write("\n}");
+      res.end();
+      console.log(`\u2705 Backup completed successfully: ${families3.length} families, ${allMembers.length} members, ${requests2.length} requests`);
     } catch (e) {
-      res.status(500).json({ message: "\u0641\u0634\u0644 \u0641\u064A \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629" });
+      console.error("Backup creation error:", e);
+      if (!res.headersSent) {
+        res.status(500).json({ message: "\u0641\u0634\u0644 \u0641\u064A \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629" });
+      } else {
+        res.end();
+      }
     }
   });
-  app2.post("/api/admin/restore", upload.single("backup"), async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/admin/restore", authMiddleware, upload.single("backup"), async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       if (!req.file) return res.status(400).json({ message: "\u064A\u0631\u062C\u0649 \u0631\u0641\u0639 \u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629" });
       const data = JSON.parse(req.file.buffer.toString());
@@ -2035,8 +2801,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u0641\u0634\u0644 \u0641\u064A \u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629" });
     }
   });
-  app2.post("/api/admin/merge", async (req, res) => {
-    if (!req.isAuthenticated() || req.user.role !== "root") return res.sendStatus(403);
+  app2.post("/api/admin/merge", authMiddleware, async (req, res) => {
+    if (req.user.role !== "root") return res.sendStatus(403);
     try {
       const { url } = req.body;
       const remoteUrl = url || process.env.DATABASE_URL;
@@ -2058,89 +2824,165 @@ function registerRoutes(app2) {
         logs: await fetchAll("logs")
       };
       let inserted = 0, updated = 0, skipped = 0;
+      console.log("\u{1F4CA} Starting optimized merge process...");
+      console.log("\u{1F4CA} Loading local data...");
+      const [localUsers, localFamilies, localMembers, localRequests, localNotifications, localSettings, localLogs] = await Promise.all([
+        storage.getAllUsers(),
+        storage.getAllFamilies(),
+        db.select().from(members),
+        // Direct query for efficiency
+        storage.getAllRequests(),
+        storage.getAllNotifications(),
+        storage.getAllSettings(),
+        storage.getLogs({})
+      ]);
+      const localUserMap = new Map(localUsers.map((u) => [u.id, u]));
+      const localFamilyMap = new Map(localFamilies.map((f) => [f.id, f]));
+      const localMemberMap = new Map(localMembers.map((m) => [m.id, m]));
+      const localRequestMap = new Map(localRequests.map((r) => [r.id, r]));
+      const localNotificationMap = new Map(localNotifications.map((n) => [n.id, n]));
+      const localSettingsMap = new Map(localSettings.map((s) => [s.key, s]));
+      const localLogMap = new Map(localLogs.map((l) => [l.id, l]));
+      console.log("\u{1F4CA} Processing users in batches...");
+      const userOperations = { toInsert: [], toUpdate: [] };
       for (const r of remote.users) {
-        const local = await storage.getUser(r.id);
+        const local = localUserMap.get(r.id);
         if (!local) {
-          await storage.createUser(r);
-          inserted++;
+          userOperations.toInsert.push(r);
         } else if (r.updatedAt && local.updatedAt && new Date(r.updatedAt) > new Date(local.updatedAt)) {
-          await storage.updateUser(r.id, r);
-          updated++;
+          userOperations.toUpdate.push(r);
         } else {
           skipped++;
         }
       }
+      if (userOperations.toInsert.length > 0) {
+        console.log(`\u{1F4CA} Inserting ${userOperations.toInsert.length} users...`);
+        for (const user of userOperations.toInsert) {
+          await storage.createUser(user);
+          inserted++;
+        }
+      }
+      if (userOperations.toUpdate.length > 0) {
+        console.log(`\u{1F4CA} Updating ${userOperations.toUpdate.length} users...`);
+        for (const user of userOperations.toUpdate) {
+          await storage.updateUser(user.id, user);
+          updated++;
+        }
+      }
+      console.log("\u{1F4CA} Processing families in batches...");
+      const familyOperations = { toInsert: [], toUpdate: [] };
       for (const r of remote.families) {
-        const local = await storage.getFamily(r.id);
+        const local = localFamilyMap.get(r.id);
         if (!local) {
-          await storage.createFamily(r);
-          inserted++;
+          familyOperations.toInsert.push(r);
         } else if (r.updatedAt && local.updatedAt && new Date(r.updatedAt) > new Date(local.updatedAt)) {
-          await storage.updateFamily(r.id, r);
-          updated++;
+          familyOperations.toUpdate.push(r);
         } else {
           skipped++;
         }
       }
+      if (familyOperations.toInsert.length > 0) {
+        console.log(`\u{1F4CA} Inserting ${familyOperations.toInsert.length} families...`);
+        for (const family of familyOperations.toInsert) {
+          await storage.createFamily(family);
+          inserted++;
+        }
+      }
+      if (familyOperations.toUpdate.length > 0) {
+        console.log(`\u{1F4CA} Updating ${familyOperations.toUpdate.length} families...`);
+        for (const family of familyOperations.toUpdate) {
+          await storage.updateFamily(family.id, family);
+          updated++;
+        }
+      }
+      console.log("\u{1F4CA} Processing members in batches...");
+      const memberOperations = { toInsert: [], toUpdate: [] };
       for (const r of remote.members) {
-        const local = await storage.getMember(r.id);
+        const local = localMemberMap.get(r.id);
         if (!local) {
-          await storage.createMember(r);
-          inserted++;
+          memberOperations.toInsert.push(r);
         } else if (r.updatedAt && local.updatedAt && new Date(r.updatedAt) > new Date(local.updatedAt)) {
-          await storage.updateMember(r.id, r);
-          updated++;
+          memberOperations.toUpdate.push(r);
         } else {
           skipped++;
         }
       }
+      if (memberOperations.toInsert.length > 0) {
+        console.log(`\u{1F4CA} Inserting ${memberOperations.toInsert.length} members...`);
+        for (const member of memberOperations.toInsert) {
+          await storage.createMember(member);
+          inserted++;
+        }
+      }
+      if (memberOperations.toUpdate.length > 0) {
+        console.log(`\u{1F4CA} Updating ${memberOperations.toUpdate.length} members...`);
+        for (const member of memberOperations.toUpdate) {
+          await storage.updateMember(member.id, member);
+          updated++;
+        }
+      }
+      console.log("\u{1F4CA} Processing requests in batches...");
+      const requestOperations = { toInsert: [], toUpdate: [] };
       for (const r of remote.requests) {
-        const local = await storage.getRequest(r.id);
+        const local = localRequestMap.get(r.id);
         if (!local) {
-          await storage.createRequest(r);
-          inserted++;
+          requestOperations.toInsert.push(r);
         } else if (r.updatedAt && local.updatedAt && new Date(r.updatedAt) > new Date(local.updatedAt)) {
-          await storage.updateRequest(r.id, r);
-          updated++;
+          requestOperations.toUpdate.push(r);
         } else {
           skipped++;
         }
       }
+      if (requestOperations.toInsert.length > 0) {
+        console.log(`\u{1F4CA} Inserting ${requestOperations.toInsert.length} requests...`);
+        for (const request of requestOperations.toInsert) {
+          await storage.createRequest(request);
+          inserted++;
+        }
+      }
+      if (requestOperations.toUpdate.length > 0) {
+        console.log(`\u{1F4CA} Updating ${requestOperations.toUpdate.length} requests...`);
+        for (const request of requestOperations.toUpdate) {
+          await storage.updateRequest(request.id, request);
+          updated++;
+        }
+      }
+      console.log("\u{1F4CA} Processing notifications...");
       for (const r of remote.notifications) {
-        const all = await storage.getAllNotifications();
-        if (!all.find((n) => n.id === r.id)) {
+        if (!localNotificationMap.has(r.id)) {
           await storage.createNotification(r);
           inserted++;
         } else {
           skipped++;
         }
       }
+      console.log("\u{1F4CA} Processing settings...");
       for (const r of remote.settings) {
-        const val = await storage.getSetting(r.key);
-        if (val === void 0) {
+        if (!localSettingsMap.has(r.key)) {
           await storage.setSetting(r.key, r.value, r.description);
           inserted++;
         } else {
           skipped++;
         }
       }
+      console.log("\u{1F4CA} Processing logs...");
       for (const r of remote.logs) {
-        const all = await storage.getLogs({});
-        if (!all.find((l) => l.id === r.id)) {
+        if (!localLogMap.has(r.id)) {
           await storage.createLog(r);
           inserted++;
         } else {
           skipped++;
         }
       }
+      storage.clearSettingsCache();
       await remotePool.end();
       res.json({ message: `\u062A\u0645 \u0627\u0644\u062F\u0645\u062C: ${inserted} \u0645\u0636\u0627\u0641\u0629\u060C ${updated} \u0645\u062D\u062F\u062B\u0629\u060C ${skipped} \u0645\u062A\u0637\u0627\u0628\u0642\u0629.` });
     } catch (e) {
       res.status(500).json({ message: "\u0641\u0634\u0644 \u0641\u064A \u0627\u0644\u062F\u0645\u062C \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A: " + e.message });
     }
   });
-  app2.get("/api/users", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.get("/api/users", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       const users2 = await storage.getAllUsers();
       res.json(users2);
@@ -2148,17 +2990,18 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/support-vouchers", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.get("/api/support-vouchers", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
-      const vouchers = await storage.getAllSupportVouchers();
+      const vouchers = await storage.getAllSupportVouchersOptimized();
       res.json(vouchers);
     } catch (error) {
+      console.error("Support vouchers endpoint error:", error);
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.get("/api/support-vouchers/:id", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.get("/api/support-vouchers/:id", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       const voucherId = parseInt(req.params.id);
       const voucher = await storage.getSupportVoucher(voucherId);
@@ -2166,7 +3009,7 @@ function registerRoutes(app2) {
         return res.status(404).json({ message: "\u0627\u0644\u0643\u0648\u0628\u0648\u0646 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
       }
       const creator = await storage.getUser(voucher.createdBy);
-      const recipients = await storage.getVoucherRecipients(voucherId);
+      const recipients = await storage.getVoucherRecipientsOptimized(voucherId);
       const voucherWithDetails = {
         ...voucher,
         creator,
@@ -2177,8 +3020,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/support-vouchers", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.post("/api/support-vouchers", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       console.log("Received voucher data:", req.body);
       const createVoucherSchema = insertSupportVoucherSchema.omit({ createdBy: true });
@@ -2192,14 +3035,14 @@ function registerRoutes(app2) {
       res.status(201).json(voucher);
     } catch (error) {
       console.error("Error creating voucher:", error);
-      if (error instanceof z.ZodError) {
+      if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.patch("/api/support-vouchers/:id", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.patch("/api/support-vouchers/:id", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       const voucherId = parseInt(req.params.id);
       const { isActive } = req.body;
@@ -2213,8 +3056,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/support-vouchers/:id/recipients", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.post("/api/support-vouchers/:id/recipients", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       const voucherId = parseInt(req.params.id);
       const { familyIds } = req.body;
@@ -2236,8 +3079,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/support-vouchers/:id/notify", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.post("/api/support-vouchers/:id/notify", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       const voucherId = parseInt(req.params.id);
       const { recipientIds } = req.body;
@@ -2272,8 +3115,8 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.patch("/api/voucher-recipients/:id", async (req, res) => {
-    if (!req.isAuthenticated() || !["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
+  app2.patch("/api/voucher-recipients/:id", authMiddleware, async (req, res) => {
+    if (!["admin", "root"].includes(req.user.role)) return res.sendStatus(403);
     try {
       const recipientId = parseInt(req.params.id);
       const { status, notes } = req.body;
