@@ -1,6 +1,6 @@
 import { db } from '../db';
 import { users, families } from '../schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { hashPassword } from '../auth';
 
 // Define the expected structure for family data (as would come from Excel import)
@@ -46,12 +46,13 @@ export interface ImportFamilyData {
 
 export class BulkImportService {
   /**
-   * Performs a bulk insert of family data with associated user creation
+   * Performs a fast bulk insert of family data with associated user creation
+   * Optimized for performance to avoid timeouts
    */
-  static async bulkInsertFamilies(familiesData: ImportFamilyData[], chunkSize: number = 50) {
+  static async bulkInsertFamilies(familiesData: ImportFamilyData[], chunkSize: number = 10) {
     const results = [];
 
-    // Process in chunks to prevent memory issues and improve performance
+    // Process smaller chunks to prevent timeouts
     for (let i = 0; i < familiesData.length; i += chunkSize) {
       const chunk = familiesData.slice(i, i + chunkSize);
 
@@ -66,109 +67,84 @@ export class BulkImportService {
 
       // Create users and families in a single transaction per chunk
       const result = await db.transaction(async (tx) => {
-        // First, create users for the chunk with conflict resolution
-        const userResults = [];
+        // Create users in batch first to avoid individual operations
+        const usersToInsert = processedChunk.map(family => ({
+          username: family.husbandID,
+          password: family.hashedPassword, // Use the pre-hashed password
+          role: 'head',
+          gender: family.headGender || family.gender || 'male',
+          phone: family.primaryPhone || null
+        }));
 
-        for (const family of processedChunk) {
-          try {
-            // Attempt to insert user, ignore if already exists
-            const userInsertResult = await tx.insert(users)
-              .values({
-                username: family.husbandID,
-                password: family.hashedPassword, // Use the pre-hashed password
-                role: 'head',
-                gender: family.headGender || family.gender || 'male',
-                phone: family.primaryPhone || null
-              })
-              .onConflictDoNothing()
-              .returning({ id: users.id, username: users.username });
+        // Insert users with conflict resolution (skip if already exists)
+        await tx.insert(users)
+          .values(usersToInsert)
+          .onConflictDoNothing()
+          .execute(); // Don't return results to save memory for large imports
 
-            if (userInsertResult.length > 0) {
-              // User was created successfully
-              userResults.push(userInsertResult[0]);
-            } else {
-              // User already exists, fetch the existing user
-              const existingUser = await tx.select({ id: users.id, username: users.username })
-                .from(users)
-                .where(eq(users.username, family.husbandID));
+        // Get all users (both new and existing) by querying for all IDs we tried to insert
+        const allUsernames = processedChunk.map(family => family.husbandID);
+        const allUsers = await tx.select({ id: users.id, username: users.username })
+          .from(users)
+          .where(inArray(users.username, allUsernames));
 
-              if (existingUser.length > 0) {
-                userResults.push(existingUser[0]);
-              } else {
-                console.error(`User ${family.husbandID} was not created and doesn't exist`);
-              }
+        // Create families in batch for all users
+        const familiesToInsert = processedChunk
+          .map(family => {
+            const userResult = allUsers.find(u => u.username === family.husbandID);
+            if (!userResult) {
+              console.error(`User ${family.husbandID} not found after processing`);
+              return null;
             }
-          } catch (error) {
-            // If there's still an error, try to fetch the existing user
-            const existingUser = await tx.select({ id: users.id, username: users.username })
-              .from(users)
-              .where(eq(users.username, family.husbandID));
 
-            if (existingUser.length > 0) {
-              userResults.push(existingUser[0]);
-            } else {
-              // Log error but continue with other records
-              console.error(`Failed to create user ${family.husbandID}:`, error);
-            }
-          }
-        }
+            return {
+              userId: userResult.id,
+              husbandName: family.husbandName,
+              husbandID: family.husbandID,
+              husbandBirthDate: family.husbandBirthDate || null,
+              husbandJob: family.husbandJob || null,
+              hasDisability: family.hasDisability || false,
+              disabilityType: family.disabilityType || null,
+              hasChronicIllness: family.hasChronicIllness || false,
+              chronicIllnessType: family.chronicIllnessType || null,
+              wifeName: family.wifeName || null,
+              wifeID: family.wifeID || null,
+              wifeBirthDate: family.wifeBirthDate || null,
+              wifeJob: family.wifeJob || null,
+              wifePregnant: family.wifePregnant || false,
+              wifeHasDisability: family.wifeHasDisability || false,
+              wifeDisabilityType: family.wifeDisabilityType || null,
+              wifeHasChronicIllness: family.wifeHasChronicIllness || false,
+              wifeChronicIllnessType: family.wifeChronicIllnessType || null,
+              primaryPhone: family.primaryPhone || null,
+              secondaryPhone: family.secondaryPhone || null,
+              originalResidence: family.originalResidence || null,
+              currentHousing: family.currentHousing || null,
+              isDisplaced: family.isDisplaced || false,
+              displacedLocation: family.displacedLocation || null,
+              isAbroad: family.isAbroad || false,
+              warDamage2023: family.warDamage2023 || false,
+              warDamageDescription: family.warDamageDescription || null,
+              branch: family.branch || null,
+              landmarkNear: family.landmarkNear || null,
+              totalMembers: family.totalMembers || 0,
+              numMales: family.numMales || 0,
+              numFemales: family.numFemales || 0,
+              socialStatus: family.socialStatus || null,
+              adminNotes: family.adminNotes || null,
+            };
+          })
+          .filter((family): family is NonNullable<typeof family> => family !== null); // Remove null entries with proper typing
 
-        // Create families for users that were successfully processed
-        const validUserIds = userResults.map(u => u.id);
-        if (validUserIds.length > 0) {
-          // Create families with conflict resolution to avoid duplicates
+        // Insert families with conflict resolution
+        if (familiesToInsert.length > 0) {
           await tx.insert(families)
-            .values(
-              processedChunk
-                .filter(family => userResults.some(u => u.username === family.husbandID)) // Only process families with valid users
-                .map(family => {
-                  const userResult = userResults.find(u => u.username === family.husbandID);
-                  if (!userResult) return null;
-
-                  return {
-                    userId: userResult.id,
-                    husbandName: family.husbandName,
-                    husbandID: family.husbandID,
-                    husbandBirthDate: family.husbandBirthDate || null,
-                    husbandJob: family.husbandJob || null,
-                    hasDisability: family.hasDisability || false,
-                    disabilityType: family.disabilityType || null,
-                    hasChronicIllness: family.hasChronicIllness || false,
-                    chronicIllnessType: family.chronicIllnessType || null,
-                    wifeName: family.wifeName || null,
-                    wifeID: family.wifeID || null,
-                    wifeBirthDate: family.wifeBirthDate || null,
-                    wifeJob: family.wifeJob || null,
-                    wifePregnant: family.wifePregnant || false,
-                    wifeHasDisability: family.wifeHasDisability || false,
-                    wifeDisabilityType: family.wifeDisabilityType || null,
-                    wifeHasChronicIllness: family.wifeHasChronicIllness || false,
-                    wifeChronicIllnessType: family.wifeChronicIllnessType || null,
-                    primaryPhone: family.primaryPhone || null,
-                    secondaryPhone: family.secondaryPhone || null,
-                    originalResidence: family.originalResidence || null,
-                    currentHousing: family.currentHousing || null,
-                    isDisplaced: family.isDisplaced || false,
-                    displacedLocation: family.displacedLocation || null,
-                    isAbroad: family.isAbroad || false,
-                    warDamage2023: family.warDamage2023 || false,
-                    warDamageDescription: family.warDamageDescription || null,
-                    branch: family.branch || null,
-                    landmarkNear: family.landmarkNear || null,
-                    totalMembers: family.totalMembers || 0,
-                    numMales: family.numMales || 0,
-                    numFemales: family.numFemales || 0,
-                    socialStatus: family.socialStatus || null,
-                    adminNotes: family.adminNotes || null,
-                  };
-                })
-                .filter(Boolean) // Remove null entries
-            )
-            .onConflictDoNothing() // Skip if family already exists
+            .values(familiesToInsert)
+            .onConflictDoNothing()
             .execute();
         }
 
-        return { userResults, totalProcessed: userResults.length };
+        return { userResults: allUsers, totalProcessed: allUsers.length };
       });
 
       results.push(result);
@@ -293,7 +269,7 @@ export class BulkImportService {
       throw new Error(`Duplicate IDs found: ${duplicates.join(', ')}`);
     }
 
-    // Perform the bulk insert
-    return await this.bulkInsertFamilies(valid);
+    // Perform the bulk insert with smaller chunk size to prevent timeouts
+    return await this.bulkInsertFamilies(valid, 2); // Even smaller chunk size for better timeout handling
   }
 }

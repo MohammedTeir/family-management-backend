@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { authMiddleware, loginHandler, getCurrentUser, logoutHandler } from "./jwt-auth";
 import { comparePasswords, hashPassword } from "./auth";
 import { storage } from "./storage";
-import { insertFamilySchema, insertMemberSchema, insertRequestSchema, insertNotificationSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema, members, orphans, insertOrphanSchema } from "./schema.js";
+import { insertFamilySchema, insertMemberSchema, insertRequestSchema, insertNotificationSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema, members, orphans, insertOrphanSchema, importSessions, insertImportSessionSchema, ImportSession } from "./schema.js";
 import { db } from "./db";
 import { checkDatabaseHealth } from "./db-retry.js";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import multer from "multer";
 import cors from "cors";
 import pg from "pg";
 import * as XLSX from "xlsx";
+import { eq, and } from "drizzle-orm";
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Utility function for request type translation
@@ -299,9 +300,8 @@ export function registerRoutes(app: Express): Server {
       // Generate a session ID for this import
       const sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-      // Store initial data in temporary storage (in memory or database)
-      // For a real implementation, use Redis or database for session data
-      const sessionData = {
+      // Store the import session in the database
+      const sessionData = insertImportSessionSchema.parse({
         sessionId,
         userId: req.user!.id,
         totalRecords: data.length, // Total in original file
@@ -309,18 +309,14 @@ export function registerRoutes(app: Express): Server {
         invalidRecords: errors.length,
         uploadedAt: new Date(),
         originalFilename: req.file.originalname,
-        transformedData, // Store only the valid data
-        invalidRows: errors, // Store invalid rows for reporting
         processed: 0,
-        errors: []
-      };
+        status: "initialized",
+        transformedData: JSON.stringify(transformedData), // Store as JSON string
+        invalidRows: JSON.stringify(errors), // Store as JSON string
+      });
 
-      // In a real implementation, you would store sessionData in Redis or database
-      // For now, we'll store in memory (not suitable for production)
-      if (!global.importSessions) {
-        global.importSessions = new Map();
-      }
-      global.importSessions.set(sessionId, sessionData);
+      // Insert the session into database
+      await db.insert(importSessions).values(sessionData);
 
       console.log(`✅ Import session initialized: ${sessionId} for ${transformedData.length} valid records (skipped ${errors.length} invalid rows)`);
 
@@ -357,20 +353,22 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ message: "Session ID is required" });
       }
 
-      // Get session data
-      if (!global.importSessions) {
-        global.importSessions = new Map();
-      }
-
-      const session = global.importSessions.get(sessionId);
-      if (!session) {
+      // Get session data from database
+      const sessionResult = await db.select().from(importSessions).where(eq(importSessions.sessionId, sessionId));
+      if (!sessionResult || sessionResult.length === 0) {
         return res.status(400).json({ message: "Invalid session ID" });
       }
 
-      // Get the chunk of data to process
+      const session = sessionResult[0];
+
+      // Parse the stored JSON data
+      const transformedData = JSON.parse(session.transformedData as string || '[]');
+
+      // Get the chunk of data to process - use smaller default chunk size to prevent timeouts
+      const effectiveChunkSize = Math.min(chunkSize, 3); // Reduced default chunk size from 50 to 3
       const startIndex = startIdx || session.processed || 0;
-      const endIndex = Math.min(startIndex + chunkSize, session.transformedData.length);
-      const chunk = session.transformedData.slice(startIndex, endIndex);
+      const endIndex = Math.min(startIndex + effectiveChunkSize, transformedData.length);
+      const chunk = transformedData.slice(startIndex, endIndex);
 
       if (chunk.length === 0) {
         // No more data to process
@@ -391,25 +389,52 @@ export function registerRoutes(app: Express): Server {
 
       console.log(`📊 Processing chunk for session ${sessionId}: ${chunk.length} records, start: ${startIndex}, end: ${endIndex}`);
 
-      // Import the chunk using our optimized service
-      const { BulkImportService } = await import('./services/bulk-import.service.js');
-      const result = await BulkImportService.fastBulkImport(chunk);
+      try {
+        // Import the chunk using our optimized service
+        const { BulkImportService } = await import('./services/bulk-import.service.js');
+        const result = await BulkImportService.fastBulkImport(chunk);
 
-      // Update session progress
-      session.processed = endIndex;
-      const progress = Math.round((session.processed / session.totalRecords) * 100);
+        // Update session progress in the database
+        const newProcessedCount = endIndex;
+        await db.update(importSessions)
+          .set({
+            processed: newProcessedCount,
+            status: newProcessedCount >= transformedData.length ? "completed" : "in-progress",
+            updatedAt: new Date()
+          })
+          .where(eq(importSessions.sessionId, sessionId));
 
-      console.log(`✅ Chunk processed: ${session.processed}/${session.totalRecords} (${progress}%)`);
+        const progress = Math.round((newProcessedCount / session.totalRecords) * 100);
 
-      res.json({
-        success: true,
-        processed: session.processed,
-        total: session.totalRecords,
-        progress: progress,
-        sessionId: sessionId,
-        message: `تمت معالجة ${session.processed}/${session.totalRecords} سجل`,
-        done: session.processed >= session.totalRecords
-      });
+        console.log(`✅ Chunk processed: ${newProcessedCount}/${session.totalRecords} (${progress}%)`);
+
+        res.json({
+          success: true,
+          processed: newProcessedCount,
+          total: session.totalRecords,
+          progress: progress,
+          sessionId: sessionId,
+          message: `تمت معالجة ${newProcessedCount}/${session.totalRecords} سجل`,
+          done: newProcessedCount >= transformedData.length
+        });
+      } catch (error) {
+        console.error(`❌ Error processing chunk for session ${sessionId}:`, error);
+
+        // Update status to failed in the database
+        await db.update(importSessions)
+          .set({
+            status: "failed",
+            updatedAt: new Date()
+          })
+          .where(eq(importSessions.sessionId, sessionId));
+
+        res.status(500).json({
+          success: false,
+          message: "خطأ في معالجة جزء من البيانات",
+          error: error instanceof Error ? error.message : "Unknown error",
+          sessionId: sessionId
+        });
+      }
 
     } catch (error: any) {
       console.error('❌ Error processing import chunk:', error);
@@ -433,19 +458,25 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ message: "Session ID is required" });
       }
 
-      // Get session data
-      if (!global.importSessions) {
-        global.importSessions = new Map();
-      }
-
-      const session = global.importSessions.get(sessionId);
-      if (!session) {
+      // Get session data from database
+      const sessionResult = await db.select().from(importSessions).where(eq(importSessions.sessionId, sessionId));
+      if (!sessionResult || sessionResult.length === 0) {
         return res.status(404).json({ message: "Session not found" });
       }
+
+      const session = sessionResult[0];
 
       const progress = session.totalRecords > 0
         ? Math.round((session.processed / session.totalRecords) * 100)
         : 0;
+
+      // Parse invalid rows from JSON string
+      let invalidRows: string[] = [];
+      try {
+        invalidRows = JSON.parse(session.invalidRows as string || '[]');
+      } catch (e) {
+        console.error('Error parsing invalid rows from session:', e);
+      }
 
       res.json({
         sessionId: session.sessionId,
@@ -453,9 +484,9 @@ export function registerRoutes(app: Express): Server {
         total: session.totalRecords,
         validRecords: session.validRecords,
         invalidRecords: session.invalidRecords,
-        invalidRows: session.invalidRows, // Include invalid rows in status
+        invalidRows: invalidRows, // Include invalid rows in status
         progress: progress,
-        status: session.processed >= session.totalRecords ? 'completed' : 'in-progress',
+        status: session.status,
         message: `مستوى التقدم ${progress}%`
       });
 
@@ -481,18 +512,16 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ message: "Session ID is required" });
       }
 
-      // Get session data
-      if (!global.importSessions) {
-        global.importSessions = new Map();
-      }
-
-      const session = global.importSessions.get(sessionId);
-      if (!session) {
+      // Get session data from database to return processed count
+      const sessionResult = await db.select().from(importSessions).where(eq(importSessions.sessionId, sessionId));
+      if (!sessionResult || sessionResult.length === 0) {
         return res.status(400).json({ message: "Invalid session ID" });
       }
 
-      // Clean up the session
-      global.importSessions.delete(sessionId);
+      const session = sessionResult[0];
+
+      // Clean up the session by deleting it from the database
+      await db.delete(importSessions).where(eq(importSessions.sessionId, sessionId));
 
       console.log(`✅ Import session ${sessionId} finalized`);
 
@@ -2658,5 +2687,11 @@ export function registerRoutes(app: Express): Server {
   });
 
   const httpServer = createServer(app);
+
+  // Set longer timeout for import operations (10 minutes to handle large datasets)
+  httpServer.setTimeout(600000); // 10 minutes (600,000 ms)
+  httpServer.keepAliveTimeout = 601000; // 10 minutes + 1 second
+  httpServer.headersTimeout = 602000; // 10 minutes + 2 seconds
+
   return httpServer;
 }

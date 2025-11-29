@@ -340,6 +340,28 @@ export const insertVoucherRecipientSchema = createInsertSchema(voucherRecipients
   updatedAt: true,
 });
 
+// Import sessions table for tracking bulk import operations
+export const importSessions = pgTable("import_sessions", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 255 }).notNull().unique(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  totalRecords: integer("total_records").notNull(),
+  validRecords: integer("valid_records").notNull(),
+  invalidRecords: integer("invalid_records").notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+  originalFilename: varchar("original_filename", { length: 500 }),
+  processed: integer("processed").default(0),
+  status: varchar("status", { length: 50 }).default("initialized"), // 'initialized', 'in-progress', 'completed', 'failed'
+  transformedData: text("transformed_data"), // JSON string of the valid data to import
+  invalidRows: text("invalid_rows"), // JSON string of validation errors
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  sessionIdIdx: index("import_sessions_session_id_idx").on(table.sessionId),
+  userIdIdx: index("import_sessions_user_id_idx").on(table.userId),
+  statusIdx: index("import_sessions_status_idx").on(table.status),
+}));
+
 export const insertSessionSchema = createInsertSchema(sessions);
 
 // Types
@@ -365,6 +387,19 @@ export type InsertSupportVoucher = z.infer<typeof insertSupportVoucherSchema>;
 export type SupportVoucher = typeof supportVouchers.$inferSelect;
 export type InsertVoucherRecipient = z.infer<typeof insertVoucherRecipientSchema>;
 export type VoucherRecipient = typeof voucherRecipients.$inferSelect;
+// Create a specific insert schema for import sessions
+export const insertImportSessionSchema = createInsertSchema(importSessions, {
+  transformedData: z.string().optional(),  // JSON string
+  invalidRows: z.string().optional(),      // JSON string
+  status: z.string().default("initialized")
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true
+});
+
+export type InsertImportSession = z.infer<typeof insertImportSessionSchema>;
+export type ImportSession = typeof importSessions.$inferSelect;
 export type InsertSession = z.infer<typeof insertSessionSchema>;
 export type Session = typeof sessions.$inferSelect;
 
