@@ -66,62 +66,109 @@ export class BulkImportService {
 
       // Create users and families in a single transaction per chunk
       const result = await db.transaction(async (tx) => {
-        // First, create users for the chunk
-        const userResults = await tx.insert(users)
-          .values(
-            processedChunk.map(family => ({
-              username: family.husbandID,
-              password: family.hashedPassword, // Use the pre-hashed password
-              role: 'head',
-              gender: family.headGender || family.gender || 'male',
-              phone: family.primaryPhone || null
-            }))
-          )
-          .returning({ id: users.id, username: users.username });
+        // First, create users for the chunk with conflict resolution
+        const userResults = [];
 
-        // Create families with the created user IDs
-        const familyResults = await tx.insert(families)
-          .values(
-            processedChunk.map((family, index) => ({
-              userId: userResults[index].id,
-              husbandName: family.husbandName,
-              husbandID: family.husbandID,
-              husbandBirthDate: family.husbandBirthDate || null,
-              husbandJob: family.husbandJob || null,
-              hasDisability: family.hasDisability || false,
-              disabilityType: family.disabilityType || null,
-              hasChronicIllness: family.hasChronicIllness || false,
-              chronicIllnessType: family.chronicIllnessType || null,
-              wifeName: family.wifeName || null,
-              wifeID: family.wifeID || null,
-              wifeBirthDate: family.wifeBirthDate || null,
-              wifeJob: family.wifeJob || null,
-              wifePregnant: family.wifePregnant || false,
-              wifeHasDisability: family.wifeHasDisability || false,
-              wifeDisabilityType: family.wifeDisabilityType || null,
-              wifeHasChronicIllness: family.wifeHasChronicIllness || false,
-              wifeChronicIllnessType: family.wifeChronicIllnessType || null,
-              primaryPhone: family.primaryPhone || null,
-              secondaryPhone: family.secondaryPhone || null,
-              originalResidence: family.originalResidence || null,
-              currentHousing: family.currentHousing || null,
-              isDisplaced: family.isDisplaced || false,
-              displacedLocation: family.displacedLocation || null,
-              isAbroad: family.isAbroad || false,
-              warDamage2023: family.warDamage2023 || false,
-              warDamageDescription: family.warDamageDescription || null,
-              branch: family.branch || null,
-              landmarkNear: family.landmarkNear || null,
-              totalMembers: family.totalMembers || 0,
-              numMales: family.numMales || 0,
-              numFemales: family.numFemales || 0,
-              socialStatus: family.socialStatus || null,
-              adminNotes: family.adminNotes || null,
-            }))
-          )
-          .execute();
+        for (const family of processedChunk) {
+          try {
+            // Attempt to insert user, ignore if already exists
+            const userInsertResult = await tx.insert(users)
+              .values({
+                username: family.husbandID,
+                password: family.hashedPassword, // Use the pre-hashed password
+                role: 'head',
+                gender: family.headGender || family.gender || 'male',
+                phone: family.primaryPhone || null
+              })
+              .onConflictDoNothing()
+              .returning({ id: users.id, username: users.username });
 
-        return { userResults, familyResults };
+            if (userInsertResult.length > 0) {
+              // User was created successfully
+              userResults.push(userInsertResult[0]);
+            } else {
+              // User already exists, fetch the existing user
+              const existingUser = await tx.select({ id: users.id, username: users.username })
+                .from(users)
+                .where(eq(users.username, family.husbandID));
+
+              if (existingUser.length > 0) {
+                userResults.push(existingUser[0]);
+              } else {
+                console.error(`User ${family.husbandID} was not created and doesn't exist`);
+              }
+            }
+          } catch (error) {
+            // If there's still an error, try to fetch the existing user
+            const existingUser = await tx.select({ id: users.id, username: users.username })
+              .from(users)
+              .where(eq(users.username, family.husbandID));
+
+            if (existingUser.length > 0) {
+              userResults.push(existingUser[0]);
+            } else {
+              // Log error but continue with other records
+              console.error(`Failed to create user ${family.husbandID}:`, error);
+            }
+          }
+        }
+
+        // Create families for users that were successfully processed
+        const validUserIds = userResults.map(u => u.id);
+        if (validUserIds.length > 0) {
+          // Create families with conflict resolution to avoid duplicates
+          await tx.insert(families)
+            .values(
+              processedChunk
+                .filter(family => userResults.some(u => u.username === family.husbandID)) // Only process families with valid users
+                .map(family => {
+                  const userResult = userResults.find(u => u.username === family.husbandID);
+                  if (!userResult) return null;
+
+                  return {
+                    userId: userResult.id,
+                    husbandName: family.husbandName,
+                    husbandID: family.husbandID,
+                    husbandBirthDate: family.husbandBirthDate || null,
+                    husbandJob: family.husbandJob || null,
+                    hasDisability: family.hasDisability || false,
+                    disabilityType: family.disabilityType || null,
+                    hasChronicIllness: family.hasChronicIllness || false,
+                    chronicIllnessType: family.chronicIllnessType || null,
+                    wifeName: family.wifeName || null,
+                    wifeID: family.wifeID || null,
+                    wifeBirthDate: family.wifeBirthDate || null,
+                    wifeJob: family.wifeJob || null,
+                    wifePregnant: family.wifePregnant || false,
+                    wifeHasDisability: family.wifeHasDisability || false,
+                    wifeDisabilityType: family.wifeDisabilityType || null,
+                    wifeHasChronicIllness: family.wifeHasChronicIllness || false,
+                    wifeChronicIllnessType: family.wifeChronicIllnessType || null,
+                    primaryPhone: family.primaryPhone || null,
+                    secondaryPhone: family.secondaryPhone || null,
+                    originalResidence: family.originalResidence || null,
+                    currentHousing: family.currentHousing || null,
+                    isDisplaced: family.isDisplaced || false,
+                    displacedLocation: family.displacedLocation || null,
+                    isAbroad: family.isAbroad || false,
+                    warDamage2023: family.warDamage2023 || false,
+                    warDamageDescription: family.warDamageDescription || null,
+                    branch: family.branch || null,
+                    landmarkNear: family.landmarkNear || null,
+                    totalMembers: family.totalMembers || 0,
+                    numMales: family.numMales || 0,
+                    numFemales: family.numFemales || 0,
+                    socialStatus: family.socialStatus || null,
+                    adminNotes: family.adminNotes || null,
+                  };
+                })
+                .filter(Boolean) // Remove null entries
+            )
+            .onConflictDoNothing() // Skip if family already exists
+            .execute();
+        }
+
+        return { userResults, totalProcessed: userResults.length };
       });
 
       results.push(result);

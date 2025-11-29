@@ -1251,6 +1251,7 @@ var bulk_import_service_exports = {};
 __export(bulk_import_service_exports, {
   BulkImportService: () => BulkImportService
 });
+import { eq as eq3 } from "drizzle-orm";
 var BulkImportService;
 var init_bulk_import_service = __esm({
   "src/services/bulk-import.service.ts"() {
@@ -1274,55 +1275,83 @@ var init_bulk_import_service = __esm({
             };
           }));
           const result = await db.transaction(async (tx) => {
-            const userResults = await tx.insert(users).values(
-              processedChunk.map((family) => ({
-                username: family.husbandID,
-                password: family.hashedPassword,
-                // Use the pre-hashed password
-                role: "head",
-                gender: family.headGender || family.gender || "male",
-                phone: family.primaryPhone || null
-              }))
-            ).returning({ id: users.id, username: users.username });
-            const familyResults = await tx.insert(families2).values(
-              processedChunk.map((family, index2) => ({
-                userId: userResults[index2].id,
-                husbandName: family.husbandName,
-                husbandID: family.husbandID,
-                husbandBirthDate: family.husbandBirthDate || null,
-                husbandJob: family.husbandJob || null,
-                hasDisability: family.hasDisability || false,
-                disabilityType: family.disabilityType || null,
-                hasChronicIllness: family.hasChronicIllness || false,
-                chronicIllnessType: family.chronicIllnessType || null,
-                wifeName: family.wifeName || null,
-                wifeID: family.wifeID || null,
-                wifeBirthDate: family.wifeBirthDate || null,
-                wifeJob: family.wifeJob || null,
-                wifePregnant: family.wifePregnant || false,
-                wifeHasDisability: family.wifeHasDisability || false,
-                wifeDisabilityType: family.wifeDisabilityType || null,
-                wifeHasChronicIllness: family.wifeHasChronicIllness || false,
-                wifeChronicIllnessType: family.wifeChronicIllnessType || null,
-                primaryPhone: family.primaryPhone || null,
-                secondaryPhone: family.secondaryPhone || null,
-                originalResidence: family.originalResidence || null,
-                currentHousing: family.currentHousing || null,
-                isDisplaced: family.isDisplaced || false,
-                displacedLocation: family.displacedLocation || null,
-                isAbroad: family.isAbroad || false,
-                warDamage2023: family.warDamage2023 || false,
-                warDamageDescription: family.warDamageDescription || null,
-                branch: family.branch || null,
-                landmarkNear: family.landmarkNear || null,
-                totalMembers: family.totalMembers || 0,
-                numMales: family.numMales || 0,
-                numFemales: family.numFemales || 0,
-                socialStatus: family.socialStatus || null,
-                adminNotes: family.adminNotes || null
-              }))
-            ).execute();
-            return { userResults, familyResults };
+            const userResults = [];
+            for (const family of processedChunk) {
+              try {
+                const userInsertResult = await tx.insert(users).values({
+                  username: family.husbandID,
+                  password: family.hashedPassword,
+                  // Use the pre-hashed password
+                  role: "head",
+                  gender: family.headGender || family.gender || "male",
+                  phone: family.primaryPhone || null
+                }).onConflictDoNothing().returning({ id: users.id, username: users.username });
+                if (userInsertResult.length > 0) {
+                  userResults.push(userInsertResult[0]);
+                } else {
+                  const existingUser = await tx.select({ id: users.id, username: users.username }).from(users).where(eq3(users.username, family.husbandID));
+                  if (existingUser.length > 0) {
+                    userResults.push(existingUser[0]);
+                  } else {
+                    console.error(`User ${family.husbandID} was not created and doesn't exist`);
+                  }
+                }
+              } catch (error) {
+                const existingUser = await tx.select({ id: users.id, username: users.username }).from(users).where(eq3(users.username, family.husbandID));
+                if (existingUser.length > 0) {
+                  userResults.push(existingUser[0]);
+                } else {
+                  console.error(`Failed to create user ${family.husbandID}:`, error);
+                }
+              }
+            }
+            const validUserIds = userResults.map((u) => u.id);
+            if (validUserIds.length > 0) {
+              await tx.insert(families2).values(
+                processedChunk.filter((family) => userResults.some((u) => u.username === family.husbandID)).map((family) => {
+                  const userResult = userResults.find((u) => u.username === family.husbandID);
+                  if (!userResult) return null;
+                  return {
+                    userId: userResult.id,
+                    husbandName: family.husbandName,
+                    husbandID: family.husbandID,
+                    husbandBirthDate: family.husbandBirthDate || null,
+                    husbandJob: family.husbandJob || null,
+                    hasDisability: family.hasDisability || false,
+                    disabilityType: family.disabilityType || null,
+                    hasChronicIllness: family.hasChronicIllness || false,
+                    chronicIllnessType: family.chronicIllnessType || null,
+                    wifeName: family.wifeName || null,
+                    wifeID: family.wifeID || null,
+                    wifeBirthDate: family.wifeBirthDate || null,
+                    wifeJob: family.wifeJob || null,
+                    wifePregnant: family.wifePregnant || false,
+                    wifeHasDisability: family.wifeHasDisability || false,
+                    wifeDisabilityType: family.wifeDisabilityType || null,
+                    wifeHasChronicIllness: family.wifeHasChronicIllness || false,
+                    wifeChronicIllnessType: family.wifeChronicIllnessType || null,
+                    primaryPhone: family.primaryPhone || null,
+                    secondaryPhone: family.secondaryPhone || null,
+                    originalResidence: family.originalResidence || null,
+                    currentHousing: family.currentHousing || null,
+                    isDisplaced: family.isDisplaced || false,
+                    displacedLocation: family.displacedLocation || null,
+                    isAbroad: family.isAbroad || false,
+                    warDamage2023: family.warDamage2023 || false,
+                    warDamageDescription: family.warDamageDescription || null,
+                    branch: family.branch || null,
+                    landmarkNear: family.landmarkNear || null,
+                    totalMembers: family.totalMembers || 0,
+                    numMales: family.numMales || 0,
+                    numFemales: family.numFemales || 0,
+                    socialStatus: family.socialStatus || null,
+                    adminNotes: family.adminNotes || null
+                  };
+                }).filter(Boolean)
+                // Remove null entries
+              ).onConflictDoNothing().execute();
+            }
+            return { userResults, totalProcessed: userResults.length };
           });
           results.push(result);
         }
