@@ -1672,60 +1672,67 @@ function registerRoutes(app2) {
         const row = data[i];
         const rowIndex = i + 2;
         try {
-          if (!row.husbandName || !row.husbandID) {
-            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0627\u0633\u0645 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629 \u0648\u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0645\u0637\u0644\u0648\u0628\u0627\u0646`);
+          const husbandName = row["husbandName"] || row["husband_name"] || row["\u0627\u0633\u0645 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629"];
+          const husbandID = row["husbandID"] || row["husband_id"] || row["\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629"];
+          const processedHusbandID = String(husbandID || "").trim();
+          const processedHusbandName = String(husbandName || "").trim();
+          if (!processedHusbandName || !processedHusbandID) {
+            const missingFields = [];
+            if (!processedHusbandName) missingFields.push("\u0627\u0633\u0645 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629");
+            if (!processedHusbandID) missingFields.push("\u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629");
+            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0627\u0644\u062D\u0642\u0648\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u0645\u0641\u0642\u0648\u062F\u0629 (${missingFields.join(" \u0648 ")})`);
             continue;
           }
-          const husbandID = String(row.husbandID);
-          if (!/^\d{9}$/.test(husbandID)) {
-            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
+          if (!/^\d{9}$/.test(processedHusbandID)) {
+            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${processedHusbandID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
             continue;
           }
-          if (row.wifeID && !/^\d{9}$/.test(String(row.wifeID))) {
-            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0632\u0648\u062C\u0629 ${row.wifeID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
+          const wifeID = row["wifeID"] || row["wife_id"] || row["\u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0632\u0648\u062C\u0629"] || null;
+          if (wifeID && !/^\d{9}$/.test(String(wifeID))) {
+            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0647\u0648\u064A\u0629 \u0627\u0644\u0632\u0648\u062C\u0629 ${wifeID} \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645`);
             continue;
           }
-          if (allHusbandIDs.has(husbandID)) {
-            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${husbandID} \u0645\u0643\u0631\u0631 \u0641\u064A \u0627\u0644\u0645\u0644\u0641`);
+          if (allHusbandIDs.has(processedHusbandID)) {
+            errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: \u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 ${processedHusbandID} \u0645\u0643\u0631\u0631 \u0641\u064A \u0627\u0644\u0645\u0644\u0641`);
             continue;
           }
-          allHusbandIDs.add(husbandID);
+          allHusbandIDs.add(processedHusbandID);
           transformedData.push({
-            husbandName: String(row.husbandName || ""),
-            husbandID,
-            husbandBirthDate: row.husbandBirthDate || null,
-            husbandJob: row.husbandJob || null,
-            hasDisability: Boolean(row.hasDisability) || false,
-            disabilityType: row.disabilityType || null,
-            hasChronicIllness: Boolean(row.hasChronicIllness) || false,
-            chronicIllnessType: row.chronicIllnessType || null,
-            wifeName: row.wifeName || null,
-            wifeID: row.wifeID || null,
-            wifeBirthDate: row.wifeBirthDate || null,
-            wifeJob: row.wifeJob || null,
-            wifePregnant: Boolean(row.wifePregnant) || false,
-            wifeHasDisability: Boolean(row.wifeHasDisability) || false,
-            wifeDisabilityType: row.wifeDisabilityType || null,
-            wifeHasChronicIllness: Boolean(row.wifeHasChronicIllness) || false,
-            wifeChronicIllnessType: row.wifeChronicIllnessType || null,
-            primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
-            secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
-            originalResidence: row.originalResidence || null,
-            currentHousing: row.currentHousing || null,
-            isDisplaced: Boolean(row.isDisplaced) || false,
-            displacedLocation: row.displacedLocation || null,
-            isAbroad: Boolean(row.isAbroad) || false,
-            warDamage2023: Boolean(row.warDamage2023) || false,
-            warDamageDescription: row.warDamageDescription || null,
-            branch: row.branch || null,
-            landmarkNear: row.landmarkNear || null,
-            totalMembers: parseInt(String(row.totalMembers)) || 0,
-            numMales: parseInt(String(row.numMales)) || 0,
-            numFemales: parseInt(String(row.numFemales)) || 0,
-            socialStatus: row.socialStatus || null,
-            adminNotes: row.adminNotes || null,
-            gender: row.gender || "male",
-            headGender: row.headGender || "male"
+            husbandName: processedHusbandName,
+            husbandID: processedHusbandID,
+            husbandBirthDate: row["husbandBirthDate"] || row["husband_birth_date"] || row["\u062A\u0627\u0631\u064A\u062E \u0645\u064A\u0644\u0627\u062F \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629"] || null,
+            husbandJob: row["husbandJob"] || row["husband_job"] || row["\u0648\u0638\u064A\u0641\u0629 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629"] || null,
+            hasDisability: Boolean(row["hasDisability"] || row["has_disability"] || row["\u0644\u062F\u064A\u0647 \u0625\u0639\u0627\u0642\u0629"] || false),
+            disabilityType: row["disabilityType"] || row["disability_type"] || row["\u0646\u0648\u0639 \u0627\u0644\u0625\u0639\u0627\u0642\u0629"] || null,
+            hasChronicIllness: Boolean(row["hasChronicIllness"] || row["has_chronic_illness"] || row["\u0644\u062F\u064A\u0647 \u0645\u0631\u0636 \u0645\u0632\u0645\u0646"] || false),
+            chronicIllnessType: row["chronicIllnessType"] || row["chronic_illness_type"] || row["\u0646\u0648\u0639 \u0627\u0644\u0645\u0631\u0636 \u0627\u0644\u0645\u0632\u0645\u0646"] || null,
+            wifeName: row["wifeName"] || row["wife_name"] || row["\u0627\u0633\u0645 \u0627\u0644\u0632\u0648\u062C\u0629"] || null,
+            wifeID,
+            wifeBirthDate: row["wifeBirthDate"] || row["wife_birth_date"] || row["\u062A\u0627\u0631\u064A\u062E \u0645\u064A\u0644\u0627\u062F \u0627\u0644\u0632\u0648\u062C\u0629"] || null,
+            wifeJob: row["wifeJob"] || row["wife_job"] || row["\u0648\u0638\u064A\u0641\u0629 \u0627\u0644\u0632\u0648\u062C\u0629"] || null,
+            wifePregnant: Boolean(row["wifePregnant"] || row["wife_pregnant"] || row["\u0627\u0644\u0632\u0648\u062C\u0629 \u062D\u0627\u0645\u0644"] || false),
+            wifeHasDisability: Boolean(row["wifeHasDisability"] || row["wife_has_disability"] || row["\u0627\u0644\u0632\u0648\u062C\u0629 \u062A\u0639\u0627\u0646\u064A \u0645\u0646 \u0625\u0639\u0627\u0642\u0629"] || false),
+            wifeDisabilityType: row["wifeDisabilityType"] || row["wife_disability_type"] || row["\u0646\u0648\u0639 \u0625\u0639\u0627\u0642\u0629 \u0627\u0644\u0632\u0648\u062C\u0629"] || null,
+            wifeHasChronicIllness: Boolean(row["wifeHasChronicIllness"] || row["wife_has_chronic_illness"] || row["\u0627\u0644\u0632\u0648\u062C\u0629 \u062A\u0639\u0627\u0646\u064A \u0645\u0646 \u0645\u0631\u0636 \u0645\u0632\u0645\u0646"] || false),
+            wifeChronicIllnessType: row["wifeChronicIllnessType"] || row["wife_chronic_illness_type"] || row["\u0646\u0648\u0639 \u0645\u0631\u0636 \u0627\u0644\u0632\u0648\u062C\u0629 \u0627\u0644\u0645\u0632\u0645\u0646"] || null,
+            primaryPhone: row["primaryPhone"] || row["primary_phone"] || row["\u0627\u0644\u0647\u0627\u062A\u0641 \u0627\u0644\u0631\u0626\u064A\u0633\u064A"] ? String(row["primaryPhone"] || row["primary_phone"] || row["\u0627\u0644\u0647\u0627\u062A\u0641 \u0627\u0644\u0631\u0626\u064A\u0633\u064A"]) : null,
+            secondaryPhone: row["secondaryPhone"] || row["secondary_phone"] || row["\u0627\u0644\u0647\u0627\u062A\u0641 \u0627\u0644\u062B\u0627\u0646\u0648\u064A"] ? String(row["secondaryPhone"] || row["secondary_phone"] || row["\u0627\u0644\u0647\u0627\u062A\u0641 \u0627\u0644\u062B\u0627\u0646\u0648\u064A"]) : null,
+            originalResidence: row["originalResidence"] || row["original_residence"] || row["\u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0627\u0644\u0623\u0635\u0644\u064A\u0629"] || null,
+            currentHousing: row["currentHousing"] || row["current_housing"] || row["\u0645\u0643\u0627\u0646 \u0627\u0644\u0633\u0643\u0646 \u0627\u0644\u062D\u0627\u0644\u064A"] || null,
+            isDisplaced: Boolean(row["isDisplaced"] || row["is_displaced"] || row["\u0645\u064F\u0647\u062C\u0651\u0631"] || false),
+            displacedLocation: row["displacedLocation"] || row["displaced_location"] || row["\u0645\u0643\u0627\u0646 \u0627\u0644\u062A\u0647\u062C\u064A\u0631"] || null,
+            isAbroad: Boolean(row["isAbroad"] || row["is_abroad"] || row["\u0641\u064A \u0627\u0644\u062E\u0627\u0631\u062C"] || false),
+            warDamage2023: Boolean(row["warDamage2023"] || row["war_damage_2023"] || row["\u062A\u0636\u0631\u0631 \u0645\u0646 \u0627\u0644\u062D\u0631\u0628 2023"] || false),
+            warDamageDescription: row["warDamageDescription"] || row["war_damage_description"] || row["\u0648\u0635\u0641 \u0627\u0644\u0636\u0631\u0631"] || null,
+            branch: row["branch"] || row["\u0627\u0644\u0641\u0631\u0639"] || null,
+            landmarkNear: row["landmarkNear"] || row["landmark_near"] || row["\u0645\u0639\u0644\u0645 \u0642\u0631\u064A\u0628"] || null,
+            totalMembers: parseInt(String(row["totalMembers"] || row["total_members"] || row["\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0623\u0641\u0631\u0627\u062F"] || 0)) || 0,
+            numMales: parseInt(String(row["numMales"] || row["num_males"] || row["\u0639\u062F\u062F \u0627\u0644\u0630\u0643\u0648\u0631"] || 0)) || 0,
+            numFemales: parseInt(String(row["numFemales"] || row["num_females"] || row["\u0639\u062F\u062F \u0627\u0644\u0625\u0646\u0627\u062B"] || 0)) || 0,
+            socialStatus: row["socialStatus"] || row["social_status"] || row["\u0627\u0644\u062D\u0627\u0644\u0629 \u0627\u0644\u0627\u062C\u062A\u0645\u0627\u0639\u064A\u0629"] || null,
+            adminNotes: row["adminNotes"] || row["admin_notes"] || row["\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0627\u0644\u0645\u0634\u0631\u0641"] || null,
+            gender: row["gender"] || row["\u0627\u0644\u062C\u0646\u0633"] || "male",
+            headGender: row["headGender"] || row["head_gender"] || row["\u062C\u0646\u0633 \u0631\u0628 \u0627\u0644\u0623\u0633\u0631\u0629"] || "male"
           });
         } catch (error) {
           console.error(`\u274C Error processing row ${rowIndex}:`, error.message);
@@ -1733,8 +1740,9 @@ function registerRoutes(app2) {
         }
       }
       if (errors.length > 0) {
+        console.log(`\u274C Found ${errors.length} validation errors:`, errors.slice(0, 10));
         return res.status(400).json({
-          message: "\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0623\u062E\u0637\u0627\u0621 \u0641\u064A \u0627\u0644\u0645\u0644\u0641",
+          message: `\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 ${errors.length} \u0623\u062E\u0637\u0627\u0621 \u0641\u064A \u0627\u0644\u0645\u0644\u0641`,
           errors: errors.slice(0, 20)
           // Limit errors to first 20
         });

@@ -211,72 +211,81 @@ export function registerRoutes(app: Express): Server {
         const rowIndex = i + 2;
 
         try {
+          // Convert all values to strings where needed and handle Excel's data types
+          const husbandName = row['husbandName'] || row['husband_name'] || row['اسم رب الأسرة'];
+          const husbandID = row['husbandID'] || row['husband_id'] || row['رقم هوية رب الأسرة'];
+
+          // Handle different Excel data formats
+          const processedHusbandID = String(husbandID || '').trim();
+          const processedHusbandName = String(husbandName || '').trim();
+
           // Validate required fields
-          if (!row.husbandName || !row.husbandID) {
-            errors.push(`الصف ${rowIndex}: اسم رب الأسرة ورقم الهوية مطلوبان`);
+          if (!processedHusbandName || !processedHusbandID) {
+            const missingFields = [];
+            if (!processedHusbandName) missingFields.push('اسم رب الأسرة');
+            if (!processedHusbandID) missingFields.push('رقم الهوية');
+            errors.push(`الصف ${rowIndex}: الحقول المطلوبة مفقودة (${missingFields.join(' و ')})`);
             continue;
           }
 
-          // Convert husbandID to string to handle Excel numeric conversion
-          const husbandID = String(row.husbandID);
-
           // Validate ID format (9 digits)
-          if (!/^\d{9}$/.test(husbandID)) {
-            errors.push(`الصف ${rowIndex}: رقم الهوية ${husbandID} يجب أن يكون 9 أرقام`);
+          if (!/^\d{9}$/.test(processedHusbandID)) {
+            errors.push(`الصف ${rowIndex}: رقم الهوية ${processedHusbandID} يجب أن يكون 9 أرقام`);
             continue;
           }
 
           // Validate wife ID if provided
-          if (row.wifeID && !/^\d{9}$/.test(String(row.wifeID))) {
-            errors.push(`الصف ${rowIndex}: رقم هوية الزوجة ${row.wifeID} يجب أن يكون 9 أرقام`);
+          const wifeID = row['wifeID'] || row['wife_id'] || row['رقم هوية الزوجة'] || null;
+          if (wifeID && !/^\d{9}$/.test(String(wifeID))) {
+            errors.push(`الصف ${rowIndex}: رقم هوية الزوجة ${wifeID} يجب أن يكون 9 أرقام`);
             continue;
           }
 
           // Check for duplicates within the file
-          if (allHusbandIDs.has(husbandID)) {
-            errors.push(`الصف ${rowIndex}: رقم الهوية ${husbandID} مكرر في الملف`);
+          if (allHusbandIDs.has(processedHusbandID)) {
+            errors.push(`الصف ${rowIndex}: رقم الهوية ${processedHusbandID} مكرر في الملف`);
             continue;
           }
 
-          allHusbandIDs.add(husbandID);
+          allHusbandIDs.add(processedHusbandID);
 
-          // Transform the data to match our schema
+          // Transform the data to match our schema - handle various column name formats
           transformedData.push({
-            husbandName: String(row.husbandName || ''),
-            husbandID: husbandID,
-            husbandBirthDate: row.husbandBirthDate || null,
-            husbandJob: row.husbandJob || null,
-            hasDisability: Boolean(row.hasDisability) || false,
-            disabilityType: row.disabilityType || null,
-            hasChronicIllness: Boolean(row.hasChronicIllness) || false,
-            chronicIllnessType: row.chronicIllnessType || null,
-            wifeName: row.wifeName || null,
-            wifeID: row.wifeID || null,
-            wifeBirthDate: row.wifeBirthDate || null,
-            wifeJob: row.wifeJob || null,
-            wifePregnant: Boolean(row.wifePregnant) || false,
-            wifeHasDisability: Boolean(row.wifeHasDisability) || false,
-            wifeDisabilityType: row.wifeDisabilityType || null,
-            wifeHasChronicIllness: Boolean(row.wifeHasChronicIllness) || false,
-            wifeChronicIllnessType: row.wifeChronicIllnessType || null,
-            primaryPhone: row.primaryPhone ? String(row.primaryPhone) : null,
-            secondaryPhone: row.secondaryPhone ? String(row.secondaryPhone) : null,
-            originalResidence: row.originalResidence || null,
-            currentHousing: row.currentHousing || null,
-            isDisplaced: Boolean(row.isDisplaced) || false,
-            displacedLocation: row.displacedLocation || null,
-            isAbroad: Boolean(row.isAbroad) || false,
-            warDamage2023: Boolean(row.warDamage2023) || false,
-            warDamageDescription: row.warDamageDescription || null,
-            branch: row.branch || null,
-            landmarkNear: row.landmarkNear || null,
-            totalMembers: parseInt(String(row.totalMembers)) || 0,
-            numMales: parseInt(String(row.numMales)) || 0,
-            numFemales: parseInt(String(row.numFemales)) || 0,
-            socialStatus: row.socialStatus || null,
-            adminNotes: row.adminNotes || null,
-            gender: row.gender || 'male',
-            headGender: row.headGender || 'male',
+            husbandName: processedHusbandName,
+            husbandID: processedHusbandID,
+            husbandBirthDate: row['husbandBirthDate'] || row['husband_birth_date'] || row['تاريخ ميلاد رب الأسرة'] || null,
+            husbandJob: row['husbandJob'] || row['husband_job'] || row['وظيفة رب الأسرة'] || null,
+            hasDisability: Boolean(row['hasDisability'] || row['has_disability'] || row['لديه إعاقة'] || false),
+            disabilityType: row['disabilityType'] || row['disability_type'] || row['نوع الإعاقة'] || null,
+            hasChronicIllness: Boolean(row['hasChronicIllness'] || row['has_chronic_illness'] || row['لديه مرض مزمن'] || false),
+            chronicIllnessType: row['chronicIllnessType'] || row['chronic_illness_type'] || row['نوع المرض المزمن'] || null,
+            wifeName: row['wifeName'] || row['wife_name'] || row['اسم الزوجة'] || null,
+            wifeID: wifeID,
+            wifeBirthDate: row['wifeBirthDate'] || row['wife_birth_date'] || row['تاريخ ميلاد الزوجة'] || null,
+            wifeJob: row['wifeJob'] || row['wife_job'] || row['وظيفة الزوجة'] || null,
+            wifePregnant: Boolean(row['wifePregnant'] || row['wife_pregnant'] || row['الزوجة حامل'] || false),
+            wifeHasDisability: Boolean(row['wifeHasDisability'] || row['wife_has_disability'] || row['الزوجة تعاني من إعاقة'] || false),
+            wifeDisabilityType: row['wifeDisabilityType'] || row['wife_disability_type'] || row['نوع إعاقة الزوجة'] || null,
+            wifeHasChronicIllness: Boolean(row['wifeHasChronicIllness'] || row['wife_has_chronic_illness'] || row['الزوجة تعاني من مرض مزمن'] || false),
+            wifeChronicIllnessType: row['wifeChronicIllnessType'] || row['wife_chronic_illness_type'] || row['نوع مرض الزوجة المزمن'] || null,
+            primaryPhone: row['primaryPhone'] || row['primary_phone'] || row['الهاتف الرئيسي'] ? String(row['primaryPhone'] || row['primary_phone'] || row['الهاتف الرئيسي']) : null,
+            secondaryPhone: row['secondaryPhone'] || row['secondary_phone'] || row['الهاتف الثانوي'] ? String(row['secondaryPhone'] || row['secondary_phone'] || row['الهاتف الثانوي']) : null,
+            originalResidence: row['originalResidence'] || row['original_residence'] || row['المنطقة الأصلية'] || null,
+            currentHousing: row['currentHousing'] || row['current_housing'] || row['مكان السكن الحالي'] || null,
+            isDisplaced: Boolean(row['isDisplaced'] || row['is_displaced'] || row['مُهجّر'] || false),
+            displacedLocation: row['displacedLocation'] || row['displaced_location'] || row['مكان التهجير'] || null,
+            isAbroad: Boolean(row['isAbroad'] || row['is_abroad'] || row['في الخارج'] || false),
+            warDamage2023: Boolean(row['warDamage2023'] || row['war_damage_2023'] || row['تضرر من الحرب 2023'] || false),
+            warDamageDescription: row['warDamageDescription'] || row['war_damage_description'] || row['وصف الضرر'] || null,
+            branch: row['branch'] || row['الفرع'] || null,
+            landmarkNear: row['landmarkNear'] || row['landmark_near'] || row['معلم قريب'] || null,
+            totalMembers: parseInt(String(row['totalMembers'] || row['total_members'] || row['إجمالي الأفراد'] || 0)) || 0,
+            numMales: parseInt(String(row['numMales'] || row['num_males'] || row['عدد الذكور'] || 0)) || 0,
+            numFemales: parseInt(String(row['numFemales'] || row['num_females'] || row['عدد الإناث'] || 0)) || 0,
+            socialStatus: row['socialStatus'] || row['social_status'] || row['الحالة الاجتماعية'] || null,
+            adminNotes: row['adminNotes'] || row['admin_notes'] || row['ملاحظات المشرف'] || null,
+            gender: row['gender'] || row['الجنس'] || 'male',
+            headGender: row['headGender'] || row['head_gender'] || row['جنس رب الأسرة'] || 'male',
           });
 
         } catch (error: any) {
@@ -286,8 +295,9 @@ export function registerRoutes(app: Express): Server {
       }
 
       if (errors.length > 0) {
+        console.log(`❌ Found ${errors.length} validation errors:`, errors.slice(0, 10)); // Log first 10 errors
         return res.status(400).json({
-          message: "تم العثور على أخطاء في الملف",
+          message: `تم العثور على ${errors.length} أخطاء في الملف`,
           errors: errors.slice(0, 20) // Limit errors to first 20
         });
       }
