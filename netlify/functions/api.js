@@ -1739,23 +1739,21 @@ function registerRoutes(app2) {
           errors.push(`\u0627\u0644\u0635\u0641 ${rowIndex}: ${error.message}`);
         }
       }
-      if (errors.length > 0) {
-        console.log(`\u274C Found ${errors.length} validation errors:`, errors.slice(0, 10));
-        return res.status(400).json({
-          message: `\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 ${errors.length} \u0623\u062E\u0637\u0627\u0621 \u0641\u064A \u0627\u0644\u0645\u0644\u0641`,
-          errors: errors.slice(0, 20)
-          // Limit errors to first 20
-        });
-      }
+      console.log(`\u2705 Validation completed: ${transformedData.length} valid rows, ${errors.length} invalid rows`);
       const sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const sessionData = {
         sessionId,
         userId: req.user.id,
-        totalRecords: transformedData.length,
+        totalRecords: data.length,
+        // Total in original file
+        validRecords: transformedData.length,
+        invalidRecords: errors.length,
         uploadedAt: /* @__PURE__ */ new Date(),
         originalFilename: req.file.originalname,
         transformedData,
-        // Store the transformed data
+        // Store only the valid data
+        invalidRows: errors,
+        // Store invalid rows for reporting
         processed: 0,
         errors: []
       };
@@ -1763,11 +1761,15 @@ function registerRoutes(app2) {
         global.importSessions = /* @__PURE__ */ new Map();
       }
       global.importSessions.set(sessionId, sessionData);
-      console.log(`\u2705 Import session initialized: ${sessionId} for ${transformedData.length} records`);
+      console.log(`\u2705 Import session initialized: ${sessionId} for ${transformedData.length} valid records (skipped ${errors.length} invalid rows)`);
       res.json({
         sessionId,
-        totalRecords: transformedData.length,
-        message: `\u062A\u0645 \u062A\u0647\u064A\u0626\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F \u0644\u0640 ${transformedData.length} \u0633\u062C\u0644`
+        totalRecords: data.length,
+        validRecords: transformedData.length,
+        invalidRecords: errors.length,
+        invalidRows: errors.slice(0, 20),
+        // Include first 20 invalid rows in the response
+        message: errors.length > 0 ? `\u062A\u0645 \u062A\u0647\u064A\u0626\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F \u0644\u0640 ${transformedData.length} \u0633\u062C\u0644 \u0635\u062D\u064A\u062D (\u062A\u0645 \u062A\u062E\u0637\u064A ${errors.length} \u0633\u062C\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D)` : `\u062A\u0645 \u062A\u0647\u064A\u0626\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u0627\u0633\u062A\u064A\u0631\u0627\u062F \u0644\u0640 ${transformedData.length} \u0633\u062C\u0644`
       });
     } catch (error) {
       console.error("\u274C Error initializing import session:", error);
@@ -1854,6 +1856,10 @@ function registerRoutes(app2) {
         sessionId: session.sessionId,
         processed: session.processed,
         total: session.totalRecords,
+        validRecords: session.validRecords,
+        invalidRecords: session.invalidRecords,
+        invalidRows: session.invalidRows,
+        // Include invalid rows in status
         progress,
         status: session.processed >= session.totalRecords ? "completed" : "in-progress",
         message: `\u0645\u0633\u062A\u0648\u0649 \u0627\u0644\u062A\u0642\u062F\u0645 ${progress}%`

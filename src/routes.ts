@@ -294,13 +294,7 @@ export function registerRoutes(app: Express): Server {
         }
       }
 
-      if (errors.length > 0) {
-        console.log(`❌ Found ${errors.length} validation errors:`, errors.slice(0, 10)); // Log first 10 errors
-        return res.status(400).json({
-          message: `تم العثور على ${errors.length} أخطاء في الملف`,
-          errors: errors.slice(0, 20) // Limit errors to first 20
-        });
-      }
+      console.log(`✅ Validation completed: ${transformedData.length} valid rows, ${errors.length} invalid rows`);
 
       // Generate a session ID for this import
       const sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -310,10 +304,13 @@ export function registerRoutes(app: Express): Server {
       const sessionData = {
         sessionId,
         userId: req.user!.id,
-        totalRecords: transformedData.length,
+        totalRecords: data.length, // Total in original file
+        validRecords: transformedData.length,
+        invalidRecords: errors.length,
         uploadedAt: new Date(),
         originalFilename: req.file.originalname,
-        transformedData, // Store the transformed data
+        transformedData, // Store only the valid data
+        invalidRows: errors, // Store invalid rows for reporting
         processed: 0,
         errors: []
       };
@@ -325,12 +322,17 @@ export function registerRoutes(app: Express): Server {
       }
       global.importSessions.set(sessionId, sessionData);
 
-      console.log(`✅ Import session initialized: ${sessionId} for ${transformedData.length} records`);
+      console.log(`✅ Import session initialized: ${sessionId} for ${transformedData.length} valid records (skipped ${errors.length} invalid rows)`);
 
       res.json({
         sessionId,
-        totalRecords: transformedData.length,
-        message: `تم تهيئة جلسة الاستيراد لـ ${transformedData.length} سجل`
+        totalRecords: data.length,
+        validRecords: transformedData.length,
+        invalidRecords: errors.length,
+        invalidRows: errors.slice(0, 20), // Include first 20 invalid rows in the response
+        message: errors.length > 0
+          ? `تم تهيئة جلسة الاستيراد لـ ${transformedData.length} سجل صحيح (تم تخطي ${errors.length} سجل غير صحيح)`
+          : `تم تهيئة جلسة الاستيراد لـ ${transformedData.length} سجل`
       });
 
     } catch (error: any) {
@@ -449,6 +451,9 @@ export function registerRoutes(app: Express): Server {
         sessionId: session.sessionId,
         processed: session.processed,
         total: session.totalRecords,
+        validRecords: session.validRecords,
+        invalidRecords: session.invalidRecords,
+        invalidRows: session.invalidRows, // Include invalid rows in status
         progress: progress,
         status: session.processed >= session.totalRecords ? 'completed' : 'in-progress',
         message: `مستوى التقدم ${progress}%`
