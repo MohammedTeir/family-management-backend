@@ -8,7 +8,7 @@ import {
 } from "./schema.js";
 import { db } from "./db";
 import { withRetry } from "./db-retry.js";
-import { eq, desc, and, sql, isNull, inArray } from "drizzle-orm";
+import { eq, desc, and, or, sql, isNull, isNotNull, inArray, count, max } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -19,6 +19,7 @@ export interface IStorage {
   updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
   getAllUsers(): Promise<User[]>;
+  getUsersByIds(ids: number[]): Promise<User[]>;
   restoreUser(id: number): Promise<boolean>;
 
   // Families
@@ -27,7 +28,7 @@ export interface IStorage {
   createFamily(family: InsertFamily): Promise<Family>;
   updateFamily(id: number, family: Partial<InsertFamily>): Promise<Family | undefined>;
   getAllFamilies(): Promise<Family[]>;
-  getAllFamiliesWithMembersOptimized(): Promise<(Family & { members: Member[] })[]>;
+  getAllFamiliesWithMembersOptimized(): Promise<(Family & { members: Member[]; orphans: Orphan[] })[]>;
   deleteFamily(id: number): Promise<boolean>;
   getFamiliesByUserId(userId: number): Promise<Family[]>;
 
@@ -65,6 +66,8 @@ export interface IStorage {
   // Notifications
   getAllNotifications(): Promise<Notification[]>;
   createNotification(notification: InsertNotification): Promise<Notification>;
+  markNotificationAsRead(notificationId: number, userId: number): Promise<boolean>;
+  getUnreadNotificationsCount(userId: number): Promise<number>;
 
   // Documents
   getDocumentsByFamilyId(familyId: number): Promise<Document[]>;
@@ -74,6 +77,7 @@ export interface IStorage {
   // Logs
   getLogs(filter?: { type?: string; userId?: number; search?: string; limit?: number; offset?: number; startDate?: string; endDate?: string }): Promise<Log[]>;
   createLog(log: InsertLog): Promise<Log>;
+  getLogStatistics(startDate?: string, endDate?: string): Promise<any>;
 
   // Settings
   getSetting(key: string): Promise<string | undefined>;
@@ -166,6 +170,11 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(users).where(isNull(users.deletedAt));
   }
 
+  async getUsersByIds(ids: number[]): Promise<User[]> {
+    if (ids.length === 0) return [];
+    return await db.select().from(users).where(inArray(users.id, ids));
+  }
+
   async softDeleteUser(id: number): Promise<boolean> {
     // Remove references to the user in related tables before soft deleting the user
     await db.update(logs).set({ userId: null }).where(eq(logs.userId, id));
@@ -220,12 +229,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Optimized version using JOIN to avoid N+1 queries
-  async getAllFamiliesWithMembersOptimized(): Promise<(Family & { members: Member[] })[]> {
+  async getAllFamiliesWithMembersOptimized(): Promise<(Family & { members: Member[]; orphans: Orphan[] })[]> {
     // Get all families first
     const allFamilies = await this.getAllFamilies();
 
     // Get ALL members in one query instead of 721 separate queries
     const allMembers = await db.select().from(members);
+
+    // Get ALL orphans in one query instead of 721 separate queries
+    const allOrphans = await db.select().from(orphans);
 
     // Group members by familyId for O(1) lookup
     const membersByFamilyId = new Map<number, Member[]>();
@@ -236,13 +248,23 @@ export class DatabaseStorage implements IStorage {
       membersByFamilyId.get(member.familyId)!.push(member);
     });
 
-    // Combine families with their members
-    const familiesWithMembers = allFamilies.map(family => ({
+    // Group orphans by familyId for O(1) lookup
+    const orphansByFamilyId = new Map<number, Orphan[]>();
+    allOrphans.forEach(orph => {
+      if (!orphansByFamilyId.has(orph.familyId)) {
+        orphansByFamilyId.set(orph.familyId, []);
+      }
+      orphansByFamilyId.get(orph.familyId)!.push(orph);
+    });
+
+    // Combine families with their members and orphans
+    const familiesWithMembersAndOrphans = allFamilies.map(family => ({
       ...family,
-      members: membersByFamilyId.get(family.id) || []
+      members: membersByFamilyId.get(family.id) || [],
+      orphans: orphansByFamilyId.get(family.id) || []
     }));
 
-    return familiesWithMembers;
+    return familiesWithMembersAndOrphans;
   }
 
   async deleteFamily(id: number): Promise<boolean> {
@@ -482,6 +504,48 @@ export class DatabaseStorage implements IStorage {
     return createdNotification;
   }
 
+  async markNotificationAsRead(notificationId: number, userId: number): Promise<boolean> {
+    const result = await db
+      .update(notifications)
+      .set({ read: true })
+      .where(
+        and(
+          eq(notifications.id, notificationId),
+          or(
+            eq(notifications.target, 'all'),
+            eq(notifications.target, 'head'),
+            eq(notifications.target, 'urgent'),
+            and(
+              eq(notifications.target, 'specific'),
+              sql`${userId} = ANY(${notifications.recipients})`
+            )
+          )
+        )
+      );
+    return (result?.rowCount ?? 0) > 0;
+  }
+
+  async getUnreadNotificationsCount(userId: number): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.read, false),
+          or(
+            eq(notifications.target, 'all'),
+            eq(notifications.target, 'head'),
+            eq(notifications.target, 'urgent'),
+            and(
+              eq(notifications.target, 'specific'),
+              sql`${userId} = ANY(${notifications.recipients})`
+            )
+          )
+        )
+      );
+    return result[0]?.count ?? 0;
+  }
+
   // Documents
   async getDocumentsByFamilyId(familyId: number): Promise<Document[]> {
     return await db.select().from(documents).where(eq(documents.familyId, familyId));
@@ -512,6 +576,103 @@ export class DatabaseStorage implements IStorage {
   async createLog(log: InsertLog): Promise<Log> {
     const [created] = await db.insert(logs).values(log).returning();
     return created;
+  }
+
+  async getLogStatistics(startDate?: string, endDate?: string): Promise<any> {
+    // Get total log count with optional date range
+    let totalQuery = db.select({ count: count() }).from(logs);
+    if (startDate) totalQuery = totalQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) totalQuery = totalQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+    const [totalCount] = await totalQuery;
+
+    // Get log counts by type
+    let typeQuery = db.select({ type: logs.type, count: count() }).from(logs).groupBy(logs.type);
+    if (startDate) typeQuery = typeQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) typeQuery = typeQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+    const typeCounts = await typeQuery;
+
+    // Get log counts by user
+    let userQuery = db.select({ userId: logs.userId, count: count() }).from(logs).groupBy(logs.userId);
+    if (startDate) userQuery = userQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) userQuery = userQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+    const userCounts = await userQuery;
+
+    // Get daily log count
+    let dailyQuery = db.select({
+      date: sql<string>`DATE(${logs.createdAt})`.as('date'),
+      count: count()
+    }).from(logs).groupBy(sql`DATE(${logs.createdAt})`).orderBy(sql`DATE(${logs.createdAt})`);
+    if (startDate) dailyQuery = dailyQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) dailyQuery = dailyQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+    const dailyCounts = await dailyQuery;
+
+    // Get recently active users
+    let userActivityQuery = db.select({
+      userId: logs.userId,
+      lastActivity: max(logs.createdAt),
+      totalLogs: count()
+    }).from(logs).groupBy(logs.userId);
+    if (startDate) userActivityQuery = userActivityQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) userActivityQuery = userActivityQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+    const userActivity = await userActivityQuery;
+
+    // Get counts of logs by families (by connecting logs to families through users)
+    // This is complex as we need to join logs -> users -> families to get family stats
+    let familyLogQuery = db.select({
+      familyId: families.id,
+      familyName: families.husbandName,
+      logCount: count()
+    })
+    .from(logs)
+    .leftJoin(users, eq(logs.userId, users.id))
+    .leftJoin(families, eq(users.id, families.userId))
+    .groupBy(families.id, families.husbandName);
+
+    if (startDate) familyLogQuery = familyLogQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) familyLogQuery = familyLogQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+
+    const familyLogCounts = await familyLogQuery;
+
+    // Get unique family count (families that have at least one log)
+    let uniqueFamilyQuery = db.select({ count: count() })
+      .from(logs)
+      .leftJoin(users, eq(logs.userId, users.id))
+      .leftJoin(families, eq(users.id, families.userId))
+      .where(isNotNull(families.id));
+
+    if (startDate) uniqueFamilyQuery = uniqueFamilyQuery.where(sql`${logs.createdAt} >= ${startDate}`);
+    if (endDate) uniqueFamilyQuery = uniqueFamilyQuery.where(sql`${logs.createdAt} <= ${endDate}`);
+
+    const [uniqueFamilyCount] = await uniqueFamilyQuery;
+
+    // Get unique family counts for specific log types that are related to families
+    const familyLogTypes = ['family_creation', 'family_update', 'admin_family_update', 'spouse_update'];
+    const typeFamilyCounts = {};
+
+    for (const logType of familyLogTypes) {
+        let query = db.select({ count: count() })
+            .from(logs)
+            .leftJoin(users, eq(logs.userId, users.id))
+            .leftJoin(families, eq(users.id, families.userId))
+            .where(and(eq(logs.type, logType), isNotNull(families.id)));
+
+        if (startDate) query = query.where(sql`${logs.createdAt} >= ${startDate}`);
+        if (endDate) query = query.where(sql`${logs.createdAt} <= ${endDate}`);
+
+        const [result] = await query;
+        typeFamilyCounts[logType] = result.count;
+    }
+
+    return {
+      total: totalCount.count,
+      familyCount: uniqueFamilyCount.count,
+      byType: typeCounts,
+      byUser: userCounts,
+      daily: dailyCounts,
+      userActivity: userActivity,
+      byFamily: familyLogCounts.filter(f => f.familyId !== null), // Only include families that exist
+      typeFamilyCounts: typeFamilyCounts
+    };
   }
 
   // Settings (with caching)

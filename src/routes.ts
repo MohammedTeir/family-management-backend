@@ -14,6 +14,22 @@ import * as XLSX from "xlsx";
 import { eq, and } from "drizzle-orm";
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Multer configuration for orphan image uploads with size limits
+const orphanUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit for orphan images
+  },
+  fileFilter: (req, file, cb) => {
+    // Only allow image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed') as any, false);
+    }
+  }
+});
+
 // Utility function for request type translation
 function getRequestTypeInArabic(type: string): string {
   switch (type) {
@@ -799,10 +815,15 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Image upload handler for orphans
-  app.post("/api/orphans/upload", authMiddleware, upload.single("image"), async (req, res) => {
+  app.post("/api/orphans/upload", authMiddleware, orphanUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "لم يتم تحميل أي صورة" });
+      }
+
+      // Check file size to ensure it's within limits
+      if (req.file.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "حجم الصورة كبير جداً. الحد الأقصى 5 ميجابايت" });
       }
 
       // Convert image to base64
@@ -810,7 +831,10 @@ export function registerRoutes(app: Express): Server {
       const imageBase64 = `data:${req.file.mimetype};base64,${imageBuffer.toString('base64')}`;
 
       res.json({ image: imageBase64 });
-    } catch (error) {
+    } catch (error: any) {
+      if (error.message && error.message.includes('File too large')) {
+        return res.status(400).json({ message: "حجم الصورة كبير جداً. الحد الأقصى 5 ميجابايت" });
+      }
       console.error('Image upload error:', error);
       res.status(500).json({ message: "خطأ في تحميل الصورة" });
     }
@@ -819,26 +843,26 @@ export function registerRoutes(app: Express): Server {
   app.post("/api/orphans", authMiddleware, async (req, res) => {
     try {
       // Allow dual-role admin to add orphans to their family
-        const family = await storage.getFamilyByUserId(req.user!.id);
-        if (!family) {
-          return res.status(404).json({ message: "العائلة غير موجودة" });
-        }
-      if (isHeadOrDualRole(req.user!, family)) {
+      const userFamily = await storage.getFamilyByUserId(req.user!.id);
+      if (!userFamily) {
+        return res.status(404).json({ message: "العائلة غير موجودة" });
+      }
+      if (isHeadOrDualRole(req.user!, userFamily)) {
         const orphanDataSchema = insertOrphanSchema.omit({ familyId: true });
         const parsedData = orphanDataSchema.parse(req.body);
-        const orphanData = { ...parsedData, familyId: family.id };
-      const orphan = await storage.createOrphan(orphanData);
+        const orphanData = { ...parsedData, familyId: userFamily.id };
+        const orphan = await storage.createOrphan(orphanData);
 
-      // Get family info to get head of household's name
-      const family = await storage.getFamily(orphan.familyId);
-      // Log the orphan creation
-      await storage.createLog({
-        type: 'orphan_creation',
-        message: `تم إنشاء يتيم جديد ${orphan.orphanName || 'غير معروف'} في عائلة ${family?.husbandName || 'غير معروف'} من قبل ${req.user!.username}`,
-        userId: req.user!.id,
-      });
+        // Get family info to get head of household's name
+        const family = await storage.getFamily(orphan.familyId);
+        // Log the orphan creation
+        await storage.createLog({
+          type: 'orphan_creation',
+          message: `تم إنشاء يتيم جديد ${orphan.orphanName || 'غير معروف'} في عائلة ${family?.husbandName || 'غير معروف'} من قبل ${req.user!.username}`,
+          userId: req.user!.id,
+        });
 
-      res.status(201).json(orphan);
+        res.status(201).json(orphan);
       } else {
         return res.status(403).json({ message: "غير مصرح لك" });
       }
@@ -846,6 +870,7 @@ export function registerRoutes(app: Express): Server {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "بيانات غير صحيحة", errors: error.errors });
       }
+      console.error('Orphan creation error:', error);
       res.status(500).json({ message: "خطأ في الخادم" });
     }
   });
@@ -1268,6 +1293,31 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Mark notification as read route
+  app.post("/api/notifications/:id/read", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await storage.markNotificationAsRead(id, req.user!.id);
+      if (result) {
+        res.status(200).json({ success: true });
+      } else {
+        res.status(404).json({ message: "التنبيه غير موجود أو لا يمكن تحديده كمقروء" });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "خطأ في الخادم" });
+    }
+  });
+
+  // Get unread notifications count
+  app.get("/api/notifications/unread-count", authMiddleware, async (req, res) => {
+    try {
+      const count = await storage.getUnreadNotificationsCount(req.user!.id);
+      res.json({ count });
+    } catch (error) {
+      res.status(500).json({ message: "خطأ في الخادم" });
+    }
+  });
+
   // Admin routes
   app.get("/api/admin/families", authMiddleware, async (req, res) => {
     if (req.user!.role === 'head') return res.sendStatus(403);
@@ -1456,7 +1506,7 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Admin: Upload orphan image
-  app.post("/api/admin/orphans/upload", authMiddleware, upload.single("image"), async (req, res) => {
+  app.post("/api/admin/orphans/upload", authMiddleware, orphanUpload.single("image"), async (req, res) => {
     if (req.user!.role === 'head') return res.sendStatus(403);
 
     try {
@@ -1464,12 +1514,20 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ message: "لم يتم تحميل أي صورة" });
       }
 
+      // Check file size to ensure it's within limits
+      if (req.file.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "حجم الصورة كبير جداً. الحد الأقصى 5 ميجابايت" });
+      }
+
       // Convert image to base64
       const imageBuffer = req.file.buffer;
       const imageBase64 = `data:${req.file.mimetype};base64,${imageBuffer.toString('base64')}`;
 
       res.json({ image: imageBase64 });
-    } catch (error) {
+    } catch (error: any) {
+      if (error.message && error.message.includes('File too large')) {
+        return res.status(400).json({ message: "حجم الصورة كبير جداً. الحد الأقصى 5 ميجابايت" });
+      }
       console.error('Image upload error:', error);
       res.status(500).json({ message: "خطأ في تحميل الصورة" });
     }
@@ -1929,22 +1987,42 @@ export function registerRoutes(app: Express): Server {
   app.get("/api/admin/logs", authMiddleware, async (req, res) => {
     if (req.user!.role !== 'root' && req.user!.role !== 'admin') return res.sendStatus(403);
     try {
-      const { page = 1, pageSize = 20, type, userId, search } = req.query;
+      const { page = 1, pageSize = 20, type, userId, search, startDate, endDate } = req.query;
       const limit = Math.max(1, Math.min(Number(pageSize) || 20, 100));
       const offset = (Number(page) - 1) * limit;
       const logs = await storage.getLogs({
         type: type as string | undefined,
         userId: userId ? Number(userId) : undefined,
         search: search as string | undefined,
+        startDate: startDate as string | undefined,
+        endDate: endDate as string | undefined,
         limit,
         offset,
       });
-      // Optionally join user info
-      const usersMap = Object.fromEntries((await storage.getAllUsers()).map(u => [u.id, u]));
+      // Get only the user IDs that are actually referenced in the logs (more efficient than getting all users)
+      const userIds = [...new Set(logs.map(log => log.userId).filter(Boolean) as number[])];
+      const users = userIds.length > 0 ? await storage.getUsersByIds(userIds) : [];
+      const usersMap = Object.fromEntries(users.map(u => [u.id, u]));
       const logsWithUser = logs.map(log => ({ ...log, user: usersMap[log.userId] || null }));
       res.json(logsWithUser);
     } catch (error) {
       console.error('Error in GET /api/admin/logs:', error);
+      res.status(500).json({ message: "خطأ في الخادم" });
+    }
+  });
+
+  // Admin: Get log statistics
+  app.get("/api/admin/logs/statistics", authMiddleware, async (req, res) => {
+    if (req.user!.role !== 'root' && req.user!.role !== 'admin') return res.sendStatus(403);
+    try {
+      const { startDate, endDate } = req.query;
+      const stats = await storage.getLogStatistics(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+      res.json(stats);
+    } catch (error) {
+      console.error('Error in GET /api/admin/logs/statistics:', error);
       res.status(500).json({ message: "خطأ في الخادم" });
     }
   });

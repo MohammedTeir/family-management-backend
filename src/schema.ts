@@ -33,6 +33,9 @@ export const families = pgTable("families", {
   disabilityType: text("disability_type"),
   hasChronicIllness: boolean("has_chronic_illness").default(false),
   chronicIllnessType: text("chronic_illness_type"),
+  // Head of household war injury
+  hasWarInjury: boolean("has_war_injury").default(false),
+  warInjuryType: text("war_injury_type"),
   // Wife information
   wifeName: text("wife_name"),
   wifeID: varchar("wife_id", { length: 20 }),
@@ -44,6 +47,9 @@ export const families = pgTable("families", {
   wifeDisabilityType: text("wife_disability_type"),
   wifeHasChronicIllness: boolean("wife_has_chronic_illness").default(false),
   wifeChronicIllnessType: text("wife_chronic_illness_type"),
+  // Wife war injury
+  wifeHasWarInjury: boolean("wife_has_war_injury").default(false),
+  wifeWarInjuryType: text("wife_war_injury_type"),
   primaryPhone: varchar("primary_phone", { length: 20 }),
   secondaryPhone: varchar("secondary_phone", { length: 20 }),
   originalResidence: text("original_residence"),
@@ -84,6 +90,9 @@ export const members = pgTable("members", {
   // Chronic illness fields
   hasChronicIllness: boolean("has_chronic_illness").default(false),
   chronicIllnessType: text("chronic_illness_type"),
+  // War injury fields
+  hasWarInjury: boolean("has_war_injury").default(false),
+  warInjuryType: text("war_injury_type"),
   relationship: varchar("relationship", { length: 50 }).notNull(), // 'son', 'daughter', 'mother', 'other'
   isChild: boolean("is_child").default(true),
   createdAt: timestamp("created_at").defaultNow(),
@@ -116,8 +125,11 @@ export const notifications = pgTable("notifications", {
   message: text("message").notNull(),
   target: varchar("target", { length: 20 }).default("all"), // 'all', 'head', 'specific'
   recipients: integer("recipients").array(),
+  read: boolean("read").default(false),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  readIdx: index("notifications_read_idx").on(table.read),
+}));
 
 export const orphans = pgTable("orphans", {
   id: serial("id").primaryKey(),
@@ -133,6 +145,14 @@ export const orphans = pgTable("orphans", {
   fatherID: varchar("father_id", { length: 20 }).notNull(),
   martyrdomDate: varchar("martyrdom_date", { length: 10 }).notNull(),
   martyrdomType: varchar("martyrdom_type", { length: 50 }).notNull(), // New field for martyrdom type
+  // Orphan disability and chronic illness fields
+  hasChronicIllness: boolean("has_chronic_illness").default(false),
+  chronicIllnessType: text("chronic_illness_type"),
+  isDisabled: boolean("is_disabled").default(false),
+  disabilityType: text("disability_type"),
+  // Orphan war injury fields
+  hasWarInjury: boolean("has_war_injury").default(false),
+  warInjuryType: text("war_injury_type"),
   bankAccountNumber: text("bank_account_number").notNull(),
   accountHolderName: text("account_holder_name").notNull(),
   currentAddress: text("current_address").notNull(),
@@ -170,7 +190,12 @@ export const logs = pgTable("logs", {
   message: text("message").notNull(),
   userId: integer("user_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  typeIdx: index("logs_type_idx").on(table.type),
+  userIdIdx: index("logs_user_id_idx").on(table.userId),
+  createdAtIdx: index("logs_created_at_idx").on(table.createdAt),
+  typeUserCreatedAtIdx: index("logs_type_user_id_created_at_idx").on(table.type, table.userId, table.createdAt),
+}));
 
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
@@ -286,6 +311,8 @@ export const insertFamilySchema = createInsertSchema(families).omit({
 export const insertMemberSchema = createInsertSchema(members).omit({
   id: true,
   createdAt: true,
+}).extend({
+  memberID: z.string().regex(/^\d{9}$/, "رقم الهوية يجب أن يكون 9 أرقام").min(1, "رقم الهوية مطلوب"),
 });
 
 export const insertOrphanSchema = createInsertSchema(orphans).omit({
@@ -302,6 +329,10 @@ export const insertOrphanSchema = createInsertSchema(orphans).omit({
     required_error: "حالة الوفاة مطلوبة",
     invalid_type_error: "حالة الوفاة غير صحيحة"
   }),
+  // Add validation for new fields
+  hasChronicIllness: z.boolean().optional(),
+  isDisabled: z.boolean().optional(),
+  hasWarInjury: z.boolean().optional(),
 });
 
 export const insertRequestSchema = createInsertSchema(requests).omit({

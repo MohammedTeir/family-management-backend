@@ -37,8 +37,10 @@ __export(schema_exports, {
   documents: () => documents,
   documentsRelations: () => documentsRelations,
   families: () => families2,
+  importSessions: () => importSessions,
   insertDocumentSchema: () => insertDocumentSchema,
   insertFamilySchema: () => insertFamilySchema,
+  insertImportSessionSchema: () => insertImportSessionSchema,
   insertLogSchema: () => insertLogSchema,
   insertMemberSchema: () => insertMemberSchema,
   insertNotificationSchema: () => insertNotificationSchema,
@@ -70,7 +72,7 @@ import { pgTable, text, serial, integer, boolean, timestamp, varchar, index } fr
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
-var users, families2, members, requests, notifications, orphans, documents, sessions, logs, settings, supportVouchers, voucherRecipients, usersRelations, membersRelations, requestsRelations, orphansRelations, documentsRelations, supportVouchersRelations, voucherRecipientsRelations, insertUserSchema, insertFamilySchema, insertMemberSchema, insertOrphanSchema, insertRequestSchema, insertNotificationSchema, insertDocumentSchema, insertLogSchema, insertSettingsSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema, insertSessionSchema;
+var users, families2, members, requests, notifications, orphans, documents, sessions, logs, settings, supportVouchers, voucherRecipients, usersRelations, membersRelations, requestsRelations, orphansRelations, documentsRelations, supportVouchersRelations, voucherRecipientsRelations, insertUserSchema, insertFamilySchema, insertMemberSchema, insertOrphanSchema, insertRequestSchema, insertNotificationSchema, insertDocumentSchema, insertLogSchema, insertSettingsSchema, insertSupportVoucherSchema, insertVoucherRecipientSchema, importSessions, insertSessionSchema, insertImportSessionSchema;
 var init_schema = __esm({
   "src/schema.ts"() {
     "use strict";
@@ -106,6 +108,9 @@ var init_schema = __esm({
       disabilityType: text("disability_type"),
       hasChronicIllness: boolean("has_chronic_illness").default(false),
       chronicIllnessType: text("chronic_illness_type"),
+      // Head of household war injury
+      hasWarInjury: boolean("has_war_injury").default(false),
+      warInjuryType: text("war_injury_type"),
       // Wife information
       wifeName: text("wife_name"),
       wifeID: varchar("wife_id", { length: 20 }),
@@ -117,6 +122,9 @@ var init_schema = __esm({
       wifeDisabilityType: text("wife_disability_type"),
       wifeHasChronicIllness: boolean("wife_has_chronic_illness").default(false),
       wifeChronicIllnessType: text("wife_chronic_illness_type"),
+      // Wife war injury
+      wifeHasWarInjury: boolean("wife_has_war_injury").default(false),
+      wifeWarInjuryType: text("wife_war_injury_type"),
       primaryPhone: varchar("primary_phone", { length: 20 }),
       secondaryPhone: varchar("secondary_phone", { length: 20 }),
       originalResidence: text("original_residence"),
@@ -153,6 +161,9 @@ var init_schema = __esm({
       // Chronic illness fields
       hasChronicIllness: boolean("has_chronic_illness").default(false),
       chronicIllnessType: text("chronic_illness_type"),
+      // War injury fields
+      hasWarInjury: boolean("has_war_injury").default(false),
+      warInjuryType: text("war_injury_type"),
       relationship: varchar("relationship", { length: 50 }).notNull(),
       // 'son', 'daughter', 'mother', 'other'
       isChild: boolean("is_child").default(true),
@@ -205,6 +216,14 @@ var init_schema = __esm({
       martyrdomDate: varchar("martyrdom_date", { length: 10 }).notNull(),
       martyrdomType: varchar("martyrdom_type", { length: 50 }).notNull(),
       // New field for martyrdom type
+      // Orphan disability and chronic illness fields
+      hasChronicIllness: boolean("has_chronic_illness").default(false),
+      chronicIllnessType: text("chronic_illness_type"),
+      isDisabled: boolean("is_disabled").default(false),
+      disabilityType: text("disability_type"),
+      // Orphan war injury fields
+      hasWarInjury: boolean("has_war_injury").default(false),
+      warInjuryType: text("war_injury_type"),
       bankAccountNumber: text("bank_account_number").notNull(),
       accountHolderName: text("account_holder_name").notNull(),
       currentAddress: text("current_address").notNull(),
@@ -345,6 +364,8 @@ var init_schema = __esm({
     insertMemberSchema = createInsertSchema(members).omit({
       id: true,
       createdAt: true
+    }).extend({
+      memberID: z.string().regex(/^\d{9}$/, "\u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 9 \u0623\u0631\u0642\u0627\u0645").min(1, "\u0631\u0642\u0645 \u0627\u0644\u0647\u0648\u064A\u0629 \u0645\u0637\u0644\u0648\u0628")
     });
     insertOrphanSchema = createInsertSchema(orphans).omit({
       id: true,
@@ -359,7 +380,11 @@ var init_schema = __esm({
       martyrdomType: z.enum(["war_2023", "pre_2023_war", "natural_death"], {
         required_error: "\u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u0641\u0627\u0629 \u0645\u0637\u0644\u0648\u0628\u0629",
         invalid_type_error: "\u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u0641\u0627\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629"
-      })
+      }),
+      // Add validation for new fields
+      hasChronicIllness: z.boolean().optional(),
+      isDisabled: z.boolean().optional(),
+      hasWarInjury: z.boolean().optional()
     });
     insertRequestSchema = createInsertSchema(requests).omit({
       id: true,
@@ -390,7 +415,41 @@ var init_schema = __esm({
       id: true,
       updatedAt: true
     });
+    importSessions = pgTable("import_sessions", {
+      id: serial("id").primaryKey(),
+      sessionId: varchar("session_id", { length: 255 }).notNull().unique(),
+      userId: integer("user_id").references(() => users.id).notNull(),
+      totalRecords: integer("total_records").notNull(),
+      validRecords: integer("valid_records").notNull(),
+      invalidRecords: integer("invalid_records").notNull(),
+      uploadedAt: timestamp("uploaded_at").defaultNow(),
+      originalFilename: varchar("original_filename", { length: 500 }),
+      processed: integer("processed").default(0),
+      status: varchar("status", { length: 50 }).default("initialized"),
+      // 'initialized', 'in-progress', 'completed', 'failed'
+      transformedData: text("transformed_data"),
+      // JSON string of the valid data to import
+      invalidRows: text("invalid_rows"),
+      // JSON string of validation errors
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    }, (table) => ({
+      sessionIdIdx: index("import_sessions_session_id_idx").on(table.sessionId),
+      userIdIdx: index("import_sessions_user_id_idx").on(table.userId),
+      statusIdx: index("import_sessions_status_idx").on(table.status)
+    }));
     insertSessionSchema = createInsertSchema(sessions);
+    insertImportSessionSchema = createInsertSchema(importSessions, {
+      transformedData: z.string().optional(),
+      // JSON string
+      invalidRows: z.string().optional(),
+      // JSON string
+      status: z.string().default("initialized")
+    }).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
   }
 });
 
@@ -520,7 +579,7 @@ var init_db_retry = __esm({
 });
 
 // src/storage.ts
-import { eq as eq2, desc, and, sql, isNull, inArray } from "drizzle-orm";
+import { eq, desc, and, sql, isNull, inArray } from "drizzle-orm";
 var DatabaseStorage, storage;
 var init_storage = __esm({
   "src/storage.ts"() {
@@ -538,18 +597,18 @@ var init_storage = __esm({
       }
       // Users
       async getUser(id, opts) {
-        const whereClause = opts?.includeDeleted ? eq2(users.id, id) : and(eq2(users.id, id), isNull(users.deletedAt));
+        const whereClause = opts?.includeDeleted ? eq(users.id, id) : and(eq(users.id, id), isNull(users.deletedAt));
         const [user] = await db.select().from(users).where(whereClause);
         return user || void 0;
       }
       async getUserByUsername(username) {
         const [user] = await withRetry(
-          () => db.select().from(users).where(and(eq2(users.username, username), isNull(users.deletedAt)))
+          () => db.select().from(users).where(and(eq(users.username, username), isNull(users.deletedAt)))
         );
         return user || void 0;
       }
       async getUserByNationalId(nationalId) {
-        const [family] = await db.select({ user: users }).from(families2).innerJoin(users, and(eq2(families2.userId, users.id), isNull(users.deletedAt))).where(eq2(families2.husbandID, nationalId));
+        const [family] = await db.select({ user: users }).from(families2).innerJoin(users, and(eq(families2.userId, users.id), isNull(users.deletedAt))).where(eq(families2.husbandID, nationalId));
         return family?.user || void 0;
       }
       async createUser(insertUser) {
@@ -557,14 +616,14 @@ var init_storage = __esm({
         return user;
       }
       async updateUser(id, user) {
-        const [updatedUser] = await db.update(users).set(user).where(eq2(users.id, id)).returning();
+        const [updatedUser] = await db.update(users).set(user).where(eq(users.id, id)).returning();
         return updatedUser || void 0;
       }
       async deleteUser(id) {
-        await db.update(logs).set({ userId: null }).where(eq2(logs.userId, id));
-        await db.update(voucherRecipients).set({ updatedBy: null }).where(eq2(voucherRecipients.updatedBy, id));
-        await db.update(supportVouchers).set({ createdBy: 1 }).where(eq2(supportVouchers.createdBy, id));
-        const result = await db.delete(users).where(eq2(users.id, id));
+        await db.update(logs).set({ userId: null }).where(eq(logs.userId, id));
+        await db.update(voucherRecipients).set({ updatedBy: null }).where(eq(voucherRecipients.updatedBy, id));
+        await db.update(supportVouchers).set({ createdBy: 1 }).where(eq(supportVouchers.createdBy, id));
+        const result = await db.delete(users).where(eq(users.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
       async getAllUsers(opts) {
@@ -574,23 +633,23 @@ var init_storage = __esm({
         return await db.select().from(users).where(isNull(users.deletedAt));
       }
       async softDeleteUser(id) {
-        await db.update(logs).set({ userId: null }).where(eq2(logs.userId, id));
-        await db.update(voucherRecipients).set({ updatedBy: null }).where(eq2(voucherRecipients.updatedBy, id));
-        await db.update(supportVouchers).set({ createdBy: 1 }).where(eq2(supportVouchers.createdBy, id));
-        const [user] = await db.update(users).set({ deletedAt: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).returning();
+        await db.update(logs).set({ userId: null }).where(eq(logs.userId, id));
+        await db.update(voucherRecipients).set({ updatedBy: null }).where(eq(voucherRecipients.updatedBy, id));
+        await db.update(supportVouchers).set({ createdBy: 1 }).where(eq(supportVouchers.createdBy, id));
+        const [user] = await db.update(users).set({ deletedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
         return !!user;
       }
       async restoreUser(id) {
-        const [user] = await db.update(users).set({ deletedAt: null }).where(eq2(users.id, id)).returning();
+        const [user] = await db.update(users).set({ deletedAt: null }).where(eq(users.id, id)).returning();
         return !!user;
       }
       // Families
       async getFamily(id) {
-        const [family] = await db.select().from(families2).where(eq2(families2.id, id));
+        const [family] = await db.select().from(families2).where(eq(families2.id, id));
         return family || void 0;
       }
       async getFamilyByUserId(userId) {
-        const [family] = await db.select().from(families2).where(eq2(families2.userId, userId));
+        const [family] = await db.select().from(families2).where(eq(families2.userId, userId));
         return family || void 0;
       }
       async createFamily(family) {
@@ -598,7 +657,7 @@ var init_storage = __esm({
         return createdFamily;
       }
       async updateFamily(id, family) {
-        const [updatedFamily] = await db.update(families2).set(family).where(eq2(families2.id, id)).returning();
+        const [updatedFamily] = await db.update(families2).set(family).where(eq(families2.id, id)).returning();
         return updatedFamily || void 0;
       }
       async getAllFamilies() {
@@ -618,6 +677,7 @@ var init_storage = __esm({
       async getAllFamiliesWithMembersOptimized() {
         const allFamilies = await this.getAllFamilies();
         const allMembers = await db.select().from(members);
+        const allOrphans = await db.select().from(orphans);
         const membersByFamilyId = /* @__PURE__ */ new Map();
         allMembers.forEach((member) => {
           if (!membersByFamilyId.has(member.familyId)) {
@@ -625,23 +685,31 @@ var init_storage = __esm({
           }
           membersByFamilyId.get(member.familyId).push(member);
         });
-        const familiesWithMembers = allFamilies.map((family) => ({
+        const orphansByFamilyId = /* @__PURE__ */ new Map();
+        allOrphans.forEach((orph) => {
+          if (!orphansByFamilyId.has(orph.familyId)) {
+            orphansByFamilyId.set(orph.familyId, []);
+          }
+          orphansByFamilyId.get(orph.familyId).push(orph);
+        });
+        const familiesWithMembersAndOrphans = allFamilies.map((family) => ({
           ...family,
-          members: membersByFamilyId.get(family.id) || []
+          members: membersByFamilyId.get(family.id) || [],
+          orphans: orphansByFamilyId.get(family.id) || []
         }));
-        return familiesWithMembers;
+        return familiesWithMembersAndOrphans;
       }
       async deleteFamily(id) {
-        await db.delete(members).where(eq2(members.familyId, id));
-        await db.delete(orphans).where(eq2(orphans.familyId, id));
-        await db.delete(requests).where(eq2(requests.familyId, id));
-        await db.delete(documents).where(eq2(documents.familyId, id));
-        await db.delete(voucherRecipients).where(eq2(voucherRecipients.familyId, id));
-        const result = await db.delete(families2).where(eq2(families2.id, id));
+        await db.delete(members).where(eq(members.familyId, id));
+        await db.delete(orphans).where(eq(orphans.familyId, id));
+        await db.delete(requests).where(eq(requests.familyId, id));
+        await db.delete(documents).where(eq(documents.familyId, id));
+        await db.delete(voucherRecipients).where(eq(voucherRecipients.familyId, id));
+        const result = await db.delete(families2).where(eq(families2.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
       async getFamiliesByUserId(userId) {
-        return await db.select().from(families2).where(eq2(families2.userId, userId));
+        return await db.select().from(families2).where(eq(families2.userId, userId));
       }
       // Wife is now part of families table - retrieve from family data
       async getWifeByFamilyId(familyId) {
@@ -679,7 +747,7 @@ var init_storage = __esm({
           wifeDisabilityType: wife.wifeDisabilityType,
           wifeHasChronicIllness: wife.wifeHasChronicIllness,
           wifeChronicIllnessType: wife.wifeChronicIllnessType
-        }).where(eq2(families2.id, wife.familyId)).returning();
+        }).where(eq(families2.id, wife.familyId)).returning();
         return updatedFamily;
       }
       async updateWife(id, wife) {
@@ -695,13 +763,13 @@ var init_storage = __esm({
           wifeDisabilityType: wife.wifeDisabilityType,
           wifeHasChronicIllness: wife.wifeChronicIllness,
           wifeChronicIllnessType: wife.wifeChronicIllnessType
-        }).where(eq2(families2.id, id)).returning();
+        }).where(eq(families2.id, id)).returning();
         return updatedFamily;
       }
       async deleteWife(id) {
         const [family] = await db.select().from(families2).where(
           and(
-            eq2(families2.id, id),
+            eq(families2.id, id),
             isNull(families2.wifeName).neg()
             // Check if wifeName exists
           )
@@ -713,15 +781,15 @@ var init_storage = __esm({
           wifeBirthDate: null,
           wifeJob: null,
           wifePregnant: false
-        }).where(eq2(families2.id, id));
+        }).where(eq(families2.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
       // Members
       async getMembersByFamilyId(familyId) {
-        return await db.select().from(members).where(eq2(members.familyId, familyId));
+        return await db.select().from(members).where(eq(members.familyId, familyId));
       }
       async getMember(id) {
-        const [member] = await db.select().from(members).where(eq2(members.id, id));
+        const [member] = await db.select().from(members).where(eq(members.id, id));
         return member || void 0;
       }
       async createMember(member) {
@@ -729,16 +797,16 @@ var init_storage = __esm({
         return createdMember;
       }
       async updateMember(id, member) {
-        const [updatedMember] = await db.update(members).set(member).where(eq2(members.id, id)).returning();
+        const [updatedMember] = await db.update(members).set(member).where(eq(members.id, id)).returning();
         return updatedMember || void 0;
       }
       async deleteMember(id) {
-        const result = await db.delete(members).where(eq2(members.id, id));
+        const result = await db.delete(members).where(eq(members.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
       // Orphans
       async getOrphansByFamilyId(familyId) {
-        return await db.select().from(orphans).where(eq2(orphans.familyId, familyId));
+        return await db.select().from(orphans).where(eq(orphans.familyId, familyId));
       }
       async getAllOrphans() {
         return await db.select().from(orphans);
@@ -746,14 +814,14 @@ var init_storage = __esm({
       async getOrphansCountUnder18ByFamilyId(familyId) {
         const result = await db.select({ count: sql`count(*)` }).from(orphans).where(
           and(
-            eq2(orphans.familyId, familyId),
+            eq(orphans.familyId, familyId),
             sql`(CAST(${orphans.orphanBirthDate} AS DATE) > (CURRENT_DATE - INTERVAL '18 years'))`
           )
         );
         return result[0]?.count || 0;
       }
       async getOrphan(id) {
-        const [orphan] = await db.select().from(orphans).where(eq2(orphans.id, id));
+        const [orphan] = await db.select().from(orphans).where(eq(orphans.id, id));
         return orphan || void 0;
       }
       async createOrphan(orphan) {
@@ -761,16 +829,16 @@ var init_storage = __esm({
         return createdOrphan;
       }
       async updateOrphan(id, orphan) {
-        const [updatedOrphan] = await db.update(orphans).set(orphan).where(eq2(orphans.id, id)).returning();
+        const [updatedOrphan] = await db.update(orphans).set(orphan).where(eq(orphans.id, id)).returning();
         return updatedOrphan || void 0;
       }
       async deleteOrphan(id) {
-        const result = await db.delete(orphans).where(eq2(orphans.id, id));
+        const result = await db.delete(orphans).where(eq(orphans.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
       // Requests
       async getRequestsByFamilyId(familyId) {
-        return await db.select().from(requests).where(eq2(requests.familyId, familyId)).orderBy(desc(requests.createdAt));
+        return await db.select().from(requests).where(eq(requests.familyId, familyId)).orderBy(desc(requests.createdAt));
       }
       async getAllRequests() {
         return await db.select().from(requests).orderBy(desc(requests.createdAt));
@@ -790,7 +858,7 @@ var init_storage = __esm({
         return requestsWithFamilies;
       }
       async getRequest(id) {
-        const [request] = await db.select().from(requests).where(eq2(requests.id, id));
+        const [request] = await db.select().from(requests).where(eq(requests.id, id));
         return request || void 0;
       }
       async createRequest(request) {
@@ -801,7 +869,7 @@ var init_storage = __esm({
         const [updatedRequest] = await db.update(requests).set({
           ...request,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq2(requests.id, id)).returning();
+        }).where(eq(requests.id, id)).returning();
         return updatedRequest || void 0;
       }
       // Notifications
@@ -814,21 +882,21 @@ var init_storage = __esm({
       }
       // Documents
       async getDocumentsByFamilyId(familyId) {
-        return await db.select().from(documents).where(eq2(documents.familyId, familyId));
+        return await db.select().from(documents).where(eq(documents.familyId, familyId));
       }
       async createDocument(document) {
         const [createdDocument] = await db.insert(documents).values(document).returning();
         return createdDocument;
       }
       async deleteDocument(id) {
-        const result = await db.delete(documents).where(eq2(documents.id, id));
+        const result = await db.delete(documents).where(eq(documents.id, id));
         return (result?.rowCount ?? 0) > 0;
       }
       // Logs
       async getLogs(filter = {}) {
         let query = db.select().from(logs);
-        if (filter.type) query = query.where(eq2(logs.type, filter.type));
-        if (filter.userId) query = query.where(eq2(logs.userId, filter.userId));
+        if (filter.type) query = query.where(eq(logs.type, filter.type));
+        if (filter.userId) query = query.where(eq(logs.userId, filter.userId));
         if (filter.search) query = query.where(sql`${logs.message} ILIKE '%' || ${filter.search} || '%'`);
         if (filter.startDate) query = query.where(sql`${logs.createdAt} >= ${filter.startDate}`);
         if (filter.endDate) query = query.where(sql`${logs.createdAt} <= ${filter.endDate}`);
@@ -874,7 +942,7 @@ var init_storage = __esm({
         }
         const settingsArray = [];
         for (const [key, value] of this.settingsCache.entries()) {
-          const [fullSetting] = await db.select().from(settings).where(eq2(settings.key, key));
+          const [fullSetting] = await db.select().from(settings).where(eq(settings.key, key));
           if (fullSetting) {
             settingsArray.push(fullSetting);
           }
@@ -933,7 +1001,7 @@ var init_storage = __esm({
         return vouchersWithDetails;
       }
       async getSupportVoucher(id) {
-        const [supportVoucher] = await db.select().from(supportVouchers).where(eq2(supportVouchers.id, id));
+        const [supportVoucher] = await db.select().from(supportVouchers).where(eq(supportVouchers.id, id));
         return supportVoucher || void 0;
       }
       async createSupportVoucher(voucher) {
@@ -941,12 +1009,12 @@ var init_storage = __esm({
         return createdVoucher;
       }
       async updateSupportVoucher(id, voucher) {
-        const [updatedVoucher] = await db.update(supportVouchers).set(voucher).where(eq2(supportVouchers.id, id)).returning();
+        const [updatedVoucher] = await db.update(supportVouchers).set(voucher).where(eq(supportVouchers.id, id)).returning();
         return updatedVoucher || void 0;
       }
       // Voucher Recipients
       async getVoucherRecipients(voucherId) {
-        const recipients = await db.select().from(voucherRecipients).where(eq2(voucherRecipients.voucherId, voucherId));
+        const recipients = await db.select().from(voucherRecipients).where(eq(voucherRecipients.voucherId, voucherId));
         const recipientsWithFamilies = await Promise.all(
           recipients.map(async (recipient) => {
             const family = await this.getFamily(recipient.familyId);
@@ -960,7 +1028,7 @@ var init_storage = __esm({
       }
       // Optimized version to avoid N+1 queries for voucher recipients
       async getVoucherRecipientsOptimized(voucherId) {
-        const recipients = await db.select().from(voucherRecipients).where(eq2(voucherRecipients.voucherId, voucherId));
+        const recipients = await db.select().from(voucherRecipients).where(eq(voucherRecipients.voucherId, voucherId));
         if (recipients.length === 0) return [];
         const allFamilies = await this.getAllFamilies();
         const familyMap = /* @__PURE__ */ new Map();
@@ -976,7 +1044,7 @@ var init_storage = __esm({
         return createdRecipient;
       }
       async updateVoucherRecipient(id, recipient) {
-        const [updatedRecipient] = await db.update(voucherRecipients).set(recipient).where(eq2(voucherRecipients.id, id)).returning();
+        const [updatedRecipient] = await db.update(voucherRecipients).set(recipient).where(eq(voucherRecipients.id, id)).returning();
         return updatedRecipient || void 0;
       }
       async clearLogs() {
@@ -998,7 +1066,7 @@ var init_storage = __esm({
         await db.delete(users);
       }
       async clearHeads() {
-        const headUsers = await db.select({ id: users.id, username: users.username }).from(users).where(eq2(users.role, "head"));
+        const headUsers = await db.select({ id: users.id, username: users.username }).from(users).where(eq(users.role, "head"));
         const headUserIds = headUsers.map((user) => user.id);
         if (headUserIds.length > 0) {
           await db.delete(families2).where(inArray(families2.userId, headUserIds));
@@ -1251,7 +1319,7 @@ var bulk_import_service_exports = {};
 __export(bulk_import_service_exports, {
   BulkImportService: () => BulkImportService
 });
-import { eq as eq3 } from "drizzle-orm";
+import { inArray as inArray2 } from "drizzle-orm";
 var BulkImportService;
 var init_bulk_import_service = __esm({
   "src/services/bulk-import.service.ts"() {
@@ -1261,9 +1329,10 @@ var init_bulk_import_service = __esm({
     init_auth();
     BulkImportService = class {
       /**
-       * Performs a bulk insert of family data with associated user creation
+       * Performs a fast bulk insert of family data with associated user creation
+       * Optimized for performance to avoid timeouts
        */
-      static async bulkInsertFamilies(familiesData, chunkSize = 50) {
+      static async bulkInsertFamilies(familiesData, chunkSize = 10) {
         const results = [];
         for (let i = 0; i < familiesData.length; i += chunkSize) {
           const chunk = familiesData.slice(i, i + chunkSize);
@@ -1275,83 +1344,64 @@ var init_bulk_import_service = __esm({
             };
           }));
           const result = await db.transaction(async (tx) => {
-            const userResults = [];
-            for (const family of processedChunk) {
-              try {
-                const userInsertResult = await tx.insert(users).values({
-                  username: family.husbandID,
-                  password: family.hashedPassword,
-                  // Use the pre-hashed password
-                  role: "head",
-                  gender: family.headGender || family.gender || "male",
-                  phone: family.primaryPhone || null
-                }).onConflictDoNothing().returning({ id: users.id, username: users.username });
-                if (userInsertResult.length > 0) {
-                  userResults.push(userInsertResult[0]);
-                } else {
-                  const existingUser = await tx.select({ id: users.id, username: users.username }).from(users).where(eq3(users.username, family.husbandID));
-                  if (existingUser.length > 0) {
-                    userResults.push(existingUser[0]);
-                  } else {
-                    console.error(`User ${family.husbandID} was not created and doesn't exist`);
-                  }
-                }
-              } catch (error) {
-                const existingUser = await tx.select({ id: users.id, username: users.username }).from(users).where(eq3(users.username, family.husbandID));
-                if (existingUser.length > 0) {
-                  userResults.push(existingUser[0]);
-                } else {
-                  console.error(`Failed to create user ${family.husbandID}:`, error);
-                }
+            const usersToInsert = processedChunk.map((family) => ({
+              username: family.husbandID,
+              password: family.hashedPassword,
+              // Use the pre-hashed password
+              role: "head",
+              gender: family.headGender || family.gender || "male",
+              phone: family.primaryPhone || null
+            }));
+            await tx.insert(users).values(usersToInsert).onConflictDoNothing().execute();
+            const allUsernames = processedChunk.map((family) => family.husbandID);
+            const allUsers = await tx.select({ id: users.id, username: users.username }).from(users).where(inArray2(users.username, allUsernames));
+            const familiesToInsert = processedChunk.map((family) => {
+              const userResult = allUsers.find((u) => u.username === family.husbandID);
+              if (!userResult) {
+                console.error(`User ${family.husbandID} not found after processing`);
+                return null;
               }
+              return {
+                userId: userResult.id,
+                husbandName: family.husbandName,
+                husbandID: family.husbandID,
+                husbandBirthDate: family.husbandBirthDate || null,
+                husbandJob: family.husbandJob || null,
+                hasDisability: family.hasDisability || false,
+                disabilityType: family.disabilityType || null,
+                hasChronicIllness: family.hasChronicIllness || false,
+                chronicIllnessType: family.chronicIllnessType || null,
+                wifeName: family.wifeName || null,
+                wifeID: family.wifeID || null,
+                wifeBirthDate: family.wifeBirthDate || null,
+                wifeJob: family.wifeJob || null,
+                wifePregnant: family.wifePregnant || false,
+                wifeHasDisability: family.wifeHasDisability || false,
+                wifeDisabilityType: family.wifeDisabilityType || null,
+                wifeHasChronicIllness: family.wifeHasChronicIllness || false,
+                wifeChronicIllnessType: family.wifeChronicIllnessType || null,
+                primaryPhone: family.primaryPhone || null,
+                secondaryPhone: family.secondaryPhone || null,
+                originalResidence: family.originalResidence || null,
+                currentHousing: family.currentHousing || null,
+                isDisplaced: family.isDisplaced || false,
+                displacedLocation: family.displacedLocation || null,
+                isAbroad: family.isAbroad || false,
+                warDamage2023: family.warDamage2023 || false,
+                warDamageDescription: family.warDamageDescription || null,
+                branch: family.branch || null,
+                landmarkNear: family.landmarkNear || null,
+                totalMembers: family.totalMembers || 0,
+                numMales: family.numMales || 0,
+                numFemales: family.numFemales || 0,
+                socialStatus: family.socialStatus || null,
+                adminNotes: family.adminNotes || null
+              };
+            }).filter((family) => family !== null);
+            if (familiesToInsert.length > 0) {
+              await tx.insert(families2).values(familiesToInsert).onConflictDoNothing().execute();
             }
-            const validUserIds = userResults.map((u) => u.id);
-            if (validUserIds.length > 0) {
-              await tx.insert(families2).values(
-                processedChunk.filter((family) => userResults.some((u) => u.username === family.husbandID)).map((family) => {
-                  const userResult = userResults.find((u) => u.username === family.husbandID);
-                  if (!userResult) return null;
-                  return {
-                    userId: userResult.id,
-                    husbandName: family.husbandName,
-                    husbandID: family.husbandID,
-                    husbandBirthDate: family.husbandBirthDate || null,
-                    husbandJob: family.husbandJob || null,
-                    hasDisability: family.hasDisability || false,
-                    disabilityType: family.disabilityType || null,
-                    hasChronicIllness: family.hasChronicIllness || false,
-                    chronicIllnessType: family.chronicIllnessType || null,
-                    wifeName: family.wifeName || null,
-                    wifeID: family.wifeID || null,
-                    wifeBirthDate: family.wifeBirthDate || null,
-                    wifeJob: family.wifeJob || null,
-                    wifePregnant: family.wifePregnant || false,
-                    wifeHasDisability: family.wifeHasDisability || false,
-                    wifeDisabilityType: family.wifeDisabilityType || null,
-                    wifeHasChronicIllness: family.wifeHasChronicIllness || false,
-                    wifeChronicIllnessType: family.wifeChronicIllnessType || null,
-                    primaryPhone: family.primaryPhone || null,
-                    secondaryPhone: family.secondaryPhone || null,
-                    originalResidence: family.originalResidence || null,
-                    currentHousing: family.currentHousing || null,
-                    isDisplaced: family.isDisplaced || false,
-                    displacedLocation: family.displacedLocation || null,
-                    isAbroad: family.isAbroad || false,
-                    warDamage2023: family.warDamage2023 || false,
-                    warDamageDescription: family.warDamageDescription || null,
-                    branch: family.branch || null,
-                    landmarkNear: family.landmarkNear || null,
-                    totalMembers: family.totalMembers || 0,
-                    numMales: family.numMales || 0,
-                    numFemales: family.numFemales || 0,
-                    socialStatus: family.socialStatus || null,
-                    adminNotes: family.adminNotes || null
-                  };
-                }).filter(Boolean)
-                // Remove null entries
-              ).onConflictDoNothing().execute();
-            }
-            return { userResults, totalProcessed: userResults.length };
+            return { userResults: allUsers, totalProcessed: allUsers.length };
           });
           results.push(result);
         }
@@ -1454,7 +1504,7 @@ var init_bulk_import_service = __esm({
         if (duplicates.length > 0) {
           throw new Error(`Duplicate IDs found: ${duplicates.join(", ")}`);
         }
-        return await this.bulkInsertFamilies(valid);
+        return await this.bulkInsertFamilies(valid, 2);
       }
     };
   }
@@ -1538,7 +1588,22 @@ import multer from "multer";
 import cors from "cors";
 import pg2 from "pg";
 import * as XLSX from "xlsx";
+import { eq as eq3 } from "drizzle-orm";
 var upload = multer({ storage: multer.memoryStorage() });
+var orphanUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024
+    // 5MB limit for orphan images
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"), false);
+    }
+  }
+});
 function getRequestTypeInArabic(type) {
   switch (type) {
     case "financial":
@@ -1770,7 +1835,7 @@ function registerRoutes(app2) {
       }
       console.log(`\u2705 Validation completed: ${transformedData.length} valid rows, ${errors.length} invalid rows`);
       const sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const sessionData = {
+      const sessionData = insertImportSessionSchema.parse({
         sessionId,
         userId: req.user.id,
         totalRecords: data.length,
@@ -1779,17 +1844,14 @@ function registerRoutes(app2) {
         invalidRecords: errors.length,
         uploadedAt: /* @__PURE__ */ new Date(),
         originalFilename: req.file.originalname,
-        transformedData,
-        // Store only the valid data
-        invalidRows: errors,
-        // Store invalid rows for reporting
         processed: 0,
-        errors: []
-      };
-      if (!global.importSessions) {
-        global.importSessions = /* @__PURE__ */ new Map();
-      }
-      global.importSessions.set(sessionId, sessionData);
+        status: "initialized",
+        transformedData: JSON.stringify(transformedData),
+        // Store as JSON string
+        invalidRows: JSON.stringify(errors)
+        // Store as JSON string
+      });
+      await db.insert(importSessions).values(sessionData);
       console.log(`\u2705 Import session initialized: ${sessionId} for ${transformedData.length} valid records (skipped ${errors.length} invalid rows)`);
       res.json({
         sessionId,
@@ -1817,24 +1879,24 @@ function registerRoutes(app2) {
       if (!sessionId) {
         return res.status(400).json({ message: "Session ID is required" });
       }
-      if (!global.importSessions) {
-        global.importSessions = /* @__PURE__ */ new Map();
-      }
-      const session = global.importSessions.get(sessionId);
-      if (!session) {
+      const sessionResult = await db.select().from(importSessions).where(eq3(importSessions.sessionId, sessionId));
+      if (!sessionResult || sessionResult.length === 0) {
         return res.status(400).json({ message: "Invalid session ID" });
       }
+      const session = sessionResult[0];
+      const transformedData = JSON.parse(session.transformedData || "[]");
+      const effectiveChunkSize = Math.min(chunkSize, 3);
       const startIndex = startIdx || session.processed || 0;
-      const endIndex = Math.min(startIndex + chunkSize, session.transformedData.length);
-      const chunk = session.transformedData.slice(startIndex, endIndex);
+      const endIndex = Math.min(startIndex + effectiveChunkSize, transformedData.length);
+      const chunk = transformedData.slice(startIndex, endIndex);
       if (chunk.length === 0) {
-        const progress2 = 100;
+        const progress = 100;
         const processed = session.totalRecords;
         res.json({
           success: true,
           processed,
           total: session.totalRecords,
-          progress: progress2,
+          progress,
           sessionId,
           message: `\u0627\u0643\u062A\u0645\u0644 \u0627\u0633\u062A\u064A\u0631\u0627\u062F ${processed} \u0633\u062C\u0644`,
           done: true
@@ -1842,20 +1904,39 @@ function registerRoutes(app2) {
         return;
       }
       console.log(`\u{1F4CA} Processing chunk for session ${sessionId}: ${chunk.length} records, start: ${startIndex}, end: ${endIndex}`);
-      const { BulkImportService: BulkImportService2 } = await Promise.resolve().then(() => (init_bulk_import_service(), bulk_import_service_exports));
-      const result = await BulkImportService2.fastBulkImport(chunk);
-      session.processed = endIndex;
-      const progress = Math.round(session.processed / session.totalRecords * 100);
-      console.log(`\u2705 Chunk processed: ${session.processed}/${session.totalRecords} (${progress}%)`);
-      res.json({
-        success: true,
-        processed: session.processed,
-        total: session.totalRecords,
-        progress,
-        sessionId,
-        message: `\u062A\u0645\u062A \u0645\u0639\u0627\u0644\u062C\u0629 ${session.processed}/${session.totalRecords} \u0633\u062C\u0644`,
-        done: session.processed >= session.totalRecords
-      });
+      try {
+        const { BulkImportService: BulkImportService2 } = await Promise.resolve().then(() => (init_bulk_import_service(), bulk_import_service_exports));
+        const result = await BulkImportService2.fastBulkImport(chunk);
+        const newProcessedCount = endIndex;
+        await db.update(importSessions).set({
+          processed: newProcessedCount,
+          status: newProcessedCount >= transformedData.length ? "completed" : "in-progress",
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq3(importSessions.sessionId, sessionId));
+        const progress = Math.round(newProcessedCount / session.totalRecords * 100);
+        console.log(`\u2705 Chunk processed: ${newProcessedCount}/${session.totalRecords} (${progress}%)`);
+        res.json({
+          success: true,
+          processed: newProcessedCount,
+          total: session.totalRecords,
+          progress,
+          sessionId,
+          message: `\u062A\u0645\u062A \u0645\u0639\u0627\u0644\u062C\u0629 ${newProcessedCount}/${session.totalRecords} \u0633\u062C\u0644`,
+          done: newProcessedCount >= transformedData.length
+        });
+      } catch (error) {
+        console.error(`\u274C Error processing chunk for session ${sessionId}:`, error);
+        await db.update(importSessions).set({
+          status: "failed",
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq3(importSessions.sessionId, sessionId));
+        res.status(500).json({
+          success: false,
+          message: "\u062E\u0637\u0623 \u0641\u064A \u0645\u0639\u0627\u0644\u062C\u0629 \u062C\u0632\u0621 \u0645\u0646 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A",
+          error: error instanceof Error ? error.message : "Unknown error",
+          sessionId
+        });
+      }
     } catch (error) {
       console.error("\u274C Error processing import chunk:", error);
       res.status(500).json({
@@ -1873,24 +1954,28 @@ function registerRoutes(app2) {
       if (!sessionId) {
         return res.status(400).json({ message: "Session ID is required" });
       }
-      if (!global.importSessions) {
-        global.importSessions = /* @__PURE__ */ new Map();
-      }
-      const session = global.importSessions.get(sessionId);
-      if (!session) {
+      const sessionResult = await db.select().from(importSessions).where(eq3(importSessions.sessionId, sessionId));
+      if (!sessionResult || sessionResult.length === 0) {
         return res.status(404).json({ message: "Session not found" });
       }
+      const session = sessionResult[0];
       const progress = session.totalRecords > 0 ? Math.round(session.processed / session.totalRecords * 100) : 0;
+      let invalidRows = [];
+      try {
+        invalidRows = JSON.parse(session.invalidRows || "[]");
+      } catch (e) {
+        console.error("Error parsing invalid rows from session:", e);
+      }
       res.json({
         sessionId: session.sessionId,
         processed: session.processed,
         total: session.totalRecords,
         validRecords: session.validRecords,
         invalidRecords: session.invalidRecords,
-        invalidRows: session.invalidRows,
+        invalidRows,
         // Include invalid rows in status
         progress,
-        status: session.processed >= session.totalRecords ? "completed" : "in-progress",
+        status: session.status,
         message: `\u0645\u0633\u062A\u0648\u0649 \u0627\u0644\u062A\u0642\u062F\u0645 ${progress}%`
       });
     } catch (error) {
@@ -1910,14 +1995,12 @@ function registerRoutes(app2) {
       if (!sessionId) {
         return res.status(400).json({ message: "Session ID is required" });
       }
-      if (!global.importSessions) {
-        global.importSessions = /* @__PURE__ */ new Map();
-      }
-      const session = global.importSessions.get(sessionId);
-      if (!session) {
+      const sessionResult = await db.select().from(importSessions).where(eq3(importSessions.sessionId, sessionId));
+      if (!sessionResult || sessionResult.length === 0) {
         return res.status(400).json({ message: "Invalid session ID" });
       }
-      global.importSessions.delete(sessionId);
+      const session = sessionResult[0];
+      await db.delete(importSessions).where(eq3(importSessions.sessionId, sessionId));
       console.log(`\u2705 Import session ${sessionId} finalized`);
       res.json({
         success: true,
@@ -2120,34 +2203,40 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/orphans/upload", authMiddleware, upload.single("image"), async (req, res) => {
+  app2.post("/api/orphans/upload", authMiddleware, orphanUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "\u0644\u0645 \u064A\u062A\u0645 \u062A\u062D\u0645\u064A\u0644 \u0623\u064A \u0635\u0648\u0631\u0629" });
+      }
+      if (req.file.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "\u062D\u062C\u0645 \u0627\u0644\u0635\u0648\u0631\u0629 \u0643\u0628\u064A\u0631 \u062C\u062F\u0627\u064B. \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 5 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A" });
       }
       const imageBuffer = req.file.buffer;
       const imageBase64 = `data:${req.file.mimetype};base64,${imageBuffer.toString("base64")}`;
       res.json({ image: imageBase64 });
     } catch (error) {
+      if (error.message && error.message.includes("File too large")) {
+        return res.status(400).json({ message: "\u062D\u062C\u0645 \u0627\u0644\u0635\u0648\u0631\u0629 \u0643\u0628\u064A\u0631 \u062C\u062F\u0627\u064B. \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 5 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A" });
+      }
       console.error("Image upload error:", error);
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0635\u0648\u0631\u0629" });
     }
   });
   app2.post("/api/orphans", authMiddleware, async (req, res) => {
     try {
-      const family = await storage.getFamilyByUserId(req.user.id);
-      if (!family) {
+      const userFamily = await storage.getFamilyByUserId(req.user.id);
+      if (!userFamily) {
         return res.status(404).json({ message: "\u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
       }
-      if (isHeadOrDualRole(req.user, family)) {
+      if (isHeadOrDualRole(req.user, userFamily)) {
         const orphanDataSchema = insertOrphanSchema.omit({ familyId: true });
         const parsedData = orphanDataSchema.parse(req.body);
-        const orphanData = { ...parsedData, familyId: family2.id };
+        const orphanData = { ...parsedData, familyId: userFamily.id };
         const orphan = await storage.createOrphan(orphanData);
-        const family2 = await storage.getFamily(orphan.familyId);
+        const family = await storage.getFamily(orphan.familyId);
         await storage.createLog({
           type: "orphan_creation",
-          message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u064A\u062A\u064A\u0645 \u062C\u062F\u064A\u062F ${orphan.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${family2?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
+          message: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u064A\u062A\u064A\u0645 \u062C\u062F\u064A\u062F ${orphan.orphanName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0641\u064A \u0639\u0627\u0626\u0644\u0629 ${family?.husbandName || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641"} \u0645\u0646 \u0642\u0628\u0644 ${req.user.username}`,
           userId: req.user.id
         });
         res.status(201).json(orphan);
@@ -2158,6 +2247,7 @@ function registerRoutes(app2) {
       if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629", errors: error.errors });
       }
+      console.error("Orphan creation error:", error);
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
@@ -2344,7 +2434,7 @@ function registerRoutes(app2) {
         wifeBirthDate: null,
         wifeJob: null,
         wifePregnant: false
-      }).where(eq(families.id, familyId));
+      }).where(eq3(families.id, familyId));
       if (result.rowCount === 0) return res.status(404).json({ message: "\u0627\u0644\u0632\u0648\u062C/\u0627\u0644\u0632\u0648\u062C\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F/\u0629" });
       res.sendStatus(204);
     } catch (error) {
@@ -2610,16 +2700,22 @@ function registerRoutes(app2) {
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645" });
     }
   });
-  app2.post("/api/admin/orphans/upload", authMiddleware, upload.single("image"), async (req, res) => {
+  app2.post("/api/admin/orphans/upload", authMiddleware, orphanUpload.single("image"), async (req, res) => {
     if (req.user.role === "head") return res.sendStatus(403);
     try {
       if (!req.file) {
         return res.status(400).json({ message: "\u0644\u0645 \u064A\u062A\u0645 \u062A\u062D\u0645\u064A\u0644 \u0623\u064A \u0635\u0648\u0631\u0629" });
       }
+      if (req.file.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "\u062D\u062C\u0645 \u0627\u0644\u0635\u0648\u0631\u0629 \u0643\u0628\u064A\u0631 \u062C\u062F\u0627\u064B. \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 5 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A" });
+      }
       const imageBuffer = req.file.buffer;
       const imageBase64 = `data:${req.file.mimetype};base64,${imageBuffer.toString("base64")}`;
       res.json({ image: imageBase64 });
     } catch (error) {
+      if (error.message && error.message.includes("File too large")) {
+        return res.status(400).json({ message: "\u062D\u062C\u0645 \u0627\u0644\u0635\u0648\u0631\u0629 \u0643\u0628\u064A\u0631 \u062C\u062F\u0627\u064B. \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 5 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A" });
+      }
       console.error("Image upload error:", error);
       res.status(500).json({ message: "\u062E\u0637\u0623 \u0641\u064A \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0635\u0648\u0631\u0629" });
     }
@@ -3625,6 +3721,9 @@ function registerRoutes(app2) {
     }
   });
   const httpServer = createServer(app2);
+  httpServer.setTimeout(6e5);
+  httpServer.keepAliveTimeout = 601e3;
+  httpServer.headersTimeout = 602e3;
   return httpServer;
 }
 
