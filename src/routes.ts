@@ -1321,9 +1321,9 @@ export function registerRoutes(app: Express): Server {
   // Admin routes
   app.get("/api/admin/families", authMiddleware, async (req, res) => {
     if (req.user!.role === 'head') return res.sendStatus(403);
-    
+
     try {
-      const families = await storage.getAllFamiliesWithMembersOptimized();
+      const families = await storage.getAllFamiliesWithMembersAndRequestsOptimized();
       // For each family, get the user and add gender-appropriate spouse data
       const familiesWithGenderAppropriateSpouse = await Promise.all(families.map(async (family) => {
         const user = await storage.getUser(family.userId);
