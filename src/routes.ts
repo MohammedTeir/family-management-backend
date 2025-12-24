@@ -1179,13 +1179,34 @@ export function registerRoutes(app: Express): Server {
   app.get("/api/requests", authMiddleware, async (req, res) => {
     try {
       // Allow dual-role admin to fetch their family's requests
-        const family = await storage.getFamilyByUserId(req.user!.id);
+      const family = await storage.getFamilyByUserId(req.user!.id);
       if (isHeadOrDualRole(req.user!, family)) {
         if (!family) return res.json([]);
         const requests = await storage.getRequestsByFamilyId(family.id);
         res.json(requests);
       } else {
-        const requestsWithFamily = await storage.getAllRequestsWithFamilies();
+        // For admin/root users, apply branch filtering
+        // Root users can see all requests
+        // Admin users only see requests from families in their branch
+        const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
+
+        // Get all families based on branch filter
+        const families = await storage.getAllFamilies(branchFilter);
+
+        // Get requests for those families only
+        const allRequests = await storage.getAllRequests();
+
+        // Filter requests to only include those from allowed families
+        const allowedFamilyIds = new Set(families.map(f => f.id));
+        const filteredRequests = allRequests.filter(req => allowedFamilyIds.has(req.familyId));
+
+        // Get the family data for each request
+        const familyMap = new Map(families.map(family => [family.id, family]));
+        const requestsWithFamily = filteredRequests.map(request => ({
+          ...request,
+          family: familyMap.get(request.familyId)!
+        }));
+
         res.json(requestsWithFamily);
       }
     } catch (error) {
@@ -1457,10 +1478,21 @@ export function registerRoutes(app: Express): Server {
     if (req.user!.role === 'head') return res.sendStatus(403);
 
     try {
-      const orphans = await storage.getAllOrphans();
+      // Apply branch filtering for admin users
+      const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
+
+      // Get all families based on branch filter
+      const families = await storage.getAllFamilies(branchFilter);
+
+      // Get all orphans
+      const allOrphans = await storage.getAllOrphans();
+
+      // Filter orphans to only include those from allowed families
+      const allowedFamilyIds = new Set(families.map(f => f.id));
+      const filteredOrphans = allOrphans.filter(orphan => allowedFamilyIds.has(orphan.familyId));
 
       // For each orphan, get the associated family data and count of orphans under 18 in the family
-      const orphansWithFamily = await Promise.all(orphans.map(async (orphan) => {
+      const orphansWithFamily = await Promise.all(filteredOrphans.map(async (orphan) => {
         try {
           const family = await storage.getFamily(orphan.familyId);
           const orphansUnder18Count = await storage.getOrphansCountUnder18ByFamilyId(orphan.familyId);
