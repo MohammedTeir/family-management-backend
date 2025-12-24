@@ -44,7 +44,7 @@ const main = async () => {
         password: hashedPassword,
         role: "root",
         phone: "0592524815",
-        branch: "main", // Root user can access all branches
+        // branch is null/undefined for root user to access all families
         isProtected: true,
       },
     ]);

@@ -222,6 +222,7 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(families.createdAt));
       return result.map(r => r.families);
     } else {
+      // If branch is null/undefined/empty, return all families
       return await db.select().from(families).orderBy(desc(families.createdAt));
     }
   }
@@ -288,6 +289,10 @@ export class DatabaseStorage implements IStorage {
         .where(eq(users.branch, branch));
       // Extract the family data from the joined result
       const allFamilies = allFamiliesResult.map(result => result.families);
+      return this.processFamiliesWithMembersOrphansAndRequests(allFamilies);
+    } else {
+      // If branch is null/undefined/empty, get all families without filtering
+      const allFamilies = await db.select().from(families).orderBy(desc(families.createdAt));
       return this.processFamiliesWithMembersOrphansAndRequests(allFamilies);
     }
 

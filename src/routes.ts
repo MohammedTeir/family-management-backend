@@ -86,7 +86,12 @@ async function getFamilyByIdOrDualRole(familyId: number, user?: any) {
   }
 
   // If user is provided and is an admin (not root), check if the family belongs to their branch
-  if (user && user.role === 'admin' && user.branch) {
+  if (user && user.role === 'admin') {
+    // If admin has no branch assigned, they can't access any families
+    if (!user.branch) {
+      return null;
+    }
+
     const userFamily = await storage.getFamilyByUserId(user.id);
     if (userFamily && userFamily.id === familyId) {
       return family; // Allow admin to access their own family (dual role)
@@ -98,6 +103,11 @@ async function getFamilyByIdOrDualRole(familyId: number, user?: any) {
       return family;
     }
     return null; // Admin doesn't have access to this family
+  }
+
+  // Root users can access all families
+  if (user && user.role === 'root') {
+    return family;
   }
 
   return family;
@@ -605,6 +615,12 @@ export function registerRoutes(app: Express): Server {
         if (req.user!.branch) {
           familyData.branch = req.user!.branch;
         }
+      } else if (req.user!.role === 'admin') {
+        // If admin has no branch assigned, they can't create families
+        if (!req.user!.branch) {
+          return res.status(403).json({ message: "لا يمكن إنشاء عائلة: المشرف غير مخصص لفرع" });
+        }
+        familyData.branch = req.user!.branch;
       }
 
       const family = await storage.createFamily(familyData);
@@ -1346,7 +1362,9 @@ export function registerRoutes(app: Express): Server {
 
     try {
       // Filter by branch if the user is an admin (not root)
-      const branchFilter = req.user!.role === 'admin' && req.user!.branch ? req.user!.branch : undefined;
+      // Root users can see all families (branchFilter will be undefined)
+      // Admin users only see families from their branch (if assigned)
+      const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
       const families = await storage.getAllFamiliesWithMembersAndRequestsOptimized(branchFilter);
       // For each family, get the user and add gender-appropriate spouse data
       const familiesWithGenderAppropriateSpouse = await Promise.all(families.map(async (family) => {
@@ -1621,7 +1639,11 @@ export function registerRoutes(app: Express): Server {
 
       // Check if the current user is an admin to assign branch
       let userBranch = null;
-      if (req.user!.role === 'admin' && req.user!.branch) {
+      if (req.user!.role === 'admin') {
+        // If admin has no branch assigned, they can't create families
+        if (!req.user!.branch) {
+          return res.status(403).json({ message: "لا يمكن إنشاء عائلة: المشرف غير مخصص لفرع" });
+        }
         userBranch = req.user!.branch;
       }
 
@@ -2305,7 +2327,9 @@ export function registerRoutes(app: Express): Server {
       
       console.log('📊 Backing up families...');
       // Filter by branch if the user is an admin (not root)
-      const branchFilter = req.user!.role === 'admin' && req.user!.branch ? req.user!.branch : undefined;
+      // Root users can see all families (branchFilter will be undefined)
+      // Admin users only see families from their branch (if assigned)
+      const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
       const families = await storage.getAllFamilies(branchFilter);
       writeSection('families', families);
       console.log(`✅ Families: ${families.length} records`);
