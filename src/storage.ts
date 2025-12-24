@@ -217,7 +217,13 @@ export class DatabaseStorage implements IStorage {
   async getAllFamilies(branch?: string): Promise<Family[]> {
     if (branch) {
       return await db.select().from(families)
-        .where(eq(families.branch, branch))
+        .where(
+          or(
+            eq(families.branch, branch),
+            isNull(families.branch),
+            eq(families.branch, "")
+          )
+        )
         .orderBy(desc(families.createdAt));
     } else {
       // If branch is null/undefined/empty, return all families
@@ -280,10 +286,16 @@ export class DatabaseStorage implements IStorage {
     // Get all families first
     let allFamilies: Family[];
 
-    // If branch is provided, filter families by their branch
+    // If branch is provided, filter families by their branch OR where branch is null/undefined/empty
     if (branch) {
       allFamilies = await db.select().from(families)
-        .where(eq(families.branch, branch))
+        .where(
+          or(
+            eq(families.branch, branch),
+            isNull(families.branch),
+            eq(families.branch, "")
+          )
+        )
         .orderBy(desc(families.createdAt));
     } else {
       // If branch is null/undefined/empty, get all families without filtering
