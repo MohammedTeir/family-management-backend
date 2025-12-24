@@ -216,11 +216,9 @@ export class DatabaseStorage implements IStorage {
 
   async getAllFamilies(branch?: string): Promise<Family[]> {
     if (branch) {
-      const result = await db.select().from(families)
-        .innerJoin(users, eq(families.userId, users.id))
-        .where(eq(users.branch, branch))
+      return await db.select().from(families)
+        .where(eq(families.branch, branch))
         .orderBy(desc(families.createdAt));
-      return result.map(r => r.families);
     } else {
       // If branch is null/undefined/empty, return all families
       return await db.select().from(families).orderBy(desc(families.createdAt));
@@ -282,14 +280,11 @@ export class DatabaseStorage implements IStorage {
     // Get all families first
     let allFamilies: Family[];
 
-    // If branch is provided, filter families by users in that branch
+    // If branch is provided, filter families by their branch
     if (branch) {
-      const allFamiliesResult = await db.select().from(families)
-        .innerJoin(users, eq(families.userId, users.id))
-        .where(eq(users.branch, branch))
+      allFamilies = await db.select().from(families)
+        .where(eq(families.branch, branch))
         .orderBy(desc(families.createdAt));
-      // Extract the family data from the joined result
-      allFamilies = allFamiliesResult.map(result => result.families);
     } else {
       // If branch is null/undefined/empty, get all families without filtering
       allFamilies = await db.select().from(families).orderBy(desc(families.createdAt));
