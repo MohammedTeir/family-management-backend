@@ -44,6 +44,7 @@ const main = async () => {
         password: hashedPassword,
         role: "root",
         phone: "0592524815",
+        branch: "main", // Root user can access all branches
         isProtected: true,
       },
     ]);

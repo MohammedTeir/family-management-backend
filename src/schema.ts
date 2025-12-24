@@ -10,6 +10,7 @@ export const users = pgTable("users", {
   role: varchar("role", { length: 20 }).notNull().default("head"), // 'head', 'admin', 'root'
   phone: varchar("phone", { length: 20 }),
   gender: varchar("gender", { length: 10 }).default("male"), // 'male', 'female', 'other'
+  branch: varchar("branch", { length: 100 }), // Branch field for admin users
   isProtected: boolean("is_protected").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
@@ -18,6 +19,7 @@ export const users = pgTable("users", {
 }, (table) => ({
   usernameIdx: index("users_username_idx").on(table.username),
   roleIdx: index("users_role_idx").on(table.role),
+  branchIdx: index("users_branch_idx").on(table.branch),
   deletedAtIdx: index("users_deleted_at_idx").on(table.deletedAt),
 }));
 
@@ -301,11 +303,14 @@ export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
 }).extend({
   gender: z.enum(['male', 'female']).optional(),
+  branch: z.string().optional(),
 });
 
 export const insertFamilySchema = createInsertSchema(families).omit({
   id: true,
   createdAt: true,
+}).extend({
+  branch: z.string().optional(),
 });
 
 export const insertMemberSchema = createInsertSchema(members).omit({

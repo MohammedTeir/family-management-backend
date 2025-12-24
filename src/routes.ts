@@ -79,14 +79,27 @@ function getSpouseDataWithGenderLabel(family: any, headGender: string | null) {
 }
 
 // Helper: getFamilyByIdOrDualRole
-async function getFamilyByIdOrDualRole(familyId: number) {
+async function getFamilyByIdOrDualRole(familyId: number, user?: any) {
   let family = await storage.getFamily(familyId);
   if (!family) {
-    // Try to find a family whose user is an admin with a numeric username (dual-role head)
-    const allFamilies = await storage.getAllFamilies();
-    family = allFamilies.find(f => f.id === familyId);
-    // Optionally, you could also check for user role and username pattern if needed
+    return null; // Don't look for other families if the specific one doesn't exist
   }
+
+  // If user is provided and is an admin (not root), check if the family belongs to their branch
+  if (user && user.role === 'admin' && user.branch) {
+    const userFamily = await storage.getFamilyByUserId(user.id);
+    if (userFamily && userFamily.id === familyId) {
+      return family; // Allow admin to access their own family (dual role)
+    }
+
+    // Check if family belongs to the admin's branch
+    const familyUser = await storage.getUser(family.userId);
+    if (familyUser && familyUser.branch === user.branch) {
+      return family;
+    }
+    return null; // Admin doesn't have access to this family
+  }
+
   return family;
 }
 
@@ -584,6 +597,15 @@ export function registerRoutes(app: Express): Server {
     try {
       const familyData = insertFamilySchema.parse(req.body);
       familyData.userId = req.user!.id;
+
+      // For head users, check if there's a parent admin who created this head and assign the same branch
+      if (req.user!.role === 'head') {
+        // Find the user who created this head (if any) and get their branch
+        // For now, we'll check if the current head user has a branch assigned from when they were created
+        if (req.user!.branch) {
+          familyData.branch = req.user!.branch;
+        }
+      }
 
       const family = await storage.createFamily(familyData);
 
@@ -1206,7 +1228,7 @@ export function registerRoutes(app: Express): Server {
       const commentChanged = originalRequest.adminComment !== request.adminComment;
       
       // Get family information for notification
-      const family = await getFamilyByIdOrDualRole(request.familyId);
+      const family = await getFamilyByIdOrDualRole(request.familyId, req.user);
       if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
 
       console.log('[Notification Debug]', {
@@ -1323,7 +1345,9 @@ export function registerRoutes(app: Express): Server {
     if (req.user!.role === 'head') return res.sendStatus(403);
 
     try {
-      const families = await storage.getAllFamiliesWithMembersAndRequestsOptimized();
+      // Filter by branch if the user is an admin (not root)
+      const branchFilter = req.user!.role === 'admin' && req.user!.branch ? req.user!.branch : undefined;
+      const families = await storage.getAllFamiliesWithMembersAndRequestsOptimized(branchFilter);
       // For each family, get the user and add gender-appropriate spouse data
       const familiesWithGenderAppropriateSpouse = await Promise.all(families.map(async (family) => {
         const user = await storage.getUser(family.userId);
@@ -1343,7 +1367,7 @@ export function registerRoutes(app: Express): Server {
     if (req.user!.role === 'head') return res.sendStatus(403);
     try {
       const id = parseInt(req.params.id);
-      const family = await getFamilyByIdOrDualRole(id);
+      const family = await getFamilyByIdOrDualRole(id, req.user);
       if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
 
       // Get the user to check their gender
@@ -1369,7 +1393,7 @@ export function registerRoutes(app: Express): Server {
       const id = parseInt(req.params.id);
       const familyData = insertFamilySchema.partial().parse(req.body);
       // Use getFamilyByIdOrDualRole to check existence before update
-      const family = await getFamilyByIdOrDualRole(id);
+      const family = await getFamilyByIdOrDualRole(id, req.user);
       if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
       const updatedFamily = await storage.updateFamily(id, familyData);
       if (!updatedFamily) return res.status(404).json({ message: "العائلة غير موجودة" });
@@ -1561,7 +1585,7 @@ export function registerRoutes(app: Express): Server {
   if (req.user!.role === 'head') return res.sendStatus(403);
   try {
     const familyId = parseInt(req.params.id);
-      const family = await getFamilyByIdOrDualRole(familyId);
+      const family = await getFamilyByIdOrDualRole(familyId, req.user);
       if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
     const memberData = { ...insertMemberSchema.omit({ familyId: true }).parse(req.body), familyId };
     const member = await storage.createMember(memberData);
@@ -1585,29 +1609,37 @@ export function registerRoutes(app: Express): Server {
 });
 
   // Registration route for family heads
-  app.post("/api/register-family", async (req, res) => {
+  app.post("/api/register-family", authMiddleware, async (req, res) => {
   try {
       const { user: userData, family: familyData, members: membersData } = req.body;
-      
+
       // Check if user already exists
       const existingUser = await storage.getUserByNationalId(familyData.husbandID);
       if (existingUser) {
         return res.status(400).json({ message: "رقم الهوية مسجل مسبقاً" });
       }
-      
+
+      // Check if the current user is an admin to assign branch
+      let userBranch = null;
+      if (req.user!.role === 'admin' && req.user!.branch) {
+        userBranch = req.user!.branch;
+      }
+
       // Create user
       const user = await storage.createUser({
         username: familyData.husbandID,
         password: userData.password ? await hashPassword(userData.password) : await hashPassword(familyData.husbandID),
         role: 'head',
         gender: userData.gender || 'male', // Add gender field, default to 'male' for backward compatibility
-        phone: familyData.primaryPhone
+        phone: familyData.primaryPhone,
+        branch: userBranch // Assign the same branch as the creating admin
       });
-      
-      // Create family
+
+      // Create family with the same branch as the user
       const family = await storage.createFamily({
         ...familyData,
-        userId: user.id
+        userId: user.id,
+        branch: userBranch // Assign the same branch as the user/admin
       });
       
       // Create members if provided
@@ -2272,7 +2304,9 @@ export function registerRoutes(app: Express): Server {
       console.log(`✅ Users: ${users.length} records`);
       
       console.log('📊 Backing up families...');
-      const families = await storage.getAllFamilies();
+      // Filter by branch if the user is an admin (not root)
+      const branchFilter = req.user!.role === 'admin' && req.user!.branch ? req.user!.branch : undefined;
+      const families = await storage.getAllFamilies(branchFilter);
       writeSection('families', families);
       console.log(`✅ Families: ${families.length} records`);
       

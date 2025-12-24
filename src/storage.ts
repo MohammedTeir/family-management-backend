@@ -27,9 +27,9 @@ export interface IStorage {
   getFamilyByUserId(userId: number): Promise<Family | undefined>;
   createFamily(family: InsertFamily): Promise<Family>;
   updateFamily(id: number, family: Partial<InsertFamily>): Promise<Family | undefined>;
-  getAllFamilies(): Promise<Family[]>;
+  getAllFamilies(branch?: string): Promise<Family[]>;
   getAllFamiliesWithMembersOptimized(): Promise<(Family & { members: Member[]; orphans: Orphan[] })[]>;
-  getAllFamiliesWithMembersAndRequestsOptimized(): Promise<(Family & { members: Member[]; orphans: Orphan[]; requests: Request[] })[]>;
+  getAllFamiliesWithMembersAndRequestsOptimized(branch?: string): Promise<(Family & { members: Member[]; orphans: Orphan[]; requests: Request[] })[]>;
   deleteFamily(id: number): Promise<boolean>;
   getFamiliesByUserId(userId: number): Promise<Family[]>;
 
@@ -214,8 +214,16 @@ export class DatabaseStorage implements IStorage {
     return updatedFamily || undefined;
   }
 
-  async getAllFamilies(): Promise<Family[]> {
-    return await db.select().from(families).orderBy(desc(families.createdAt));
+  async getAllFamilies(branch?: string): Promise<Family[]> {
+    if (branch) {
+      const result = await db.select().from(families)
+        .innerJoin(users, eq(families.userId, users.id))
+        .where(eq(users.branch, branch))
+        .orderBy(desc(families.createdAt));
+      return result.map(r => r.families);
+    } else {
+      return await db.select().from(families).orderBy(desc(families.createdAt));
+    }
   }
 
   async getAllFamiliesWithMembers(): Promise<(Family & { members: Member[] })[]> {
@@ -269,10 +277,71 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Optimized version including requests to avoid N+1 queries
-  async getAllFamiliesWithMembersAndRequestsOptimized(): Promise<(Family & { members: Member[]; orphans: Orphan[]; requests: Request[] })[]> {
+  async getAllFamiliesWithMembersAndRequestsOptimized(branch?: string): Promise<(Family & { members: Member[]; orphans: Orphan[]; requests: Request[] })[]> {
     // Get all families first
-    const allFamilies = await this.getAllFamilies();
+    let allFamiliesQuery = db.select().from(families);
 
+    // If branch is provided, filter families by users in that branch
+    if (branch) {
+      const allFamiliesResult = await db.select().from(families)
+        .innerJoin(users, eq(families.userId, users.id))
+        .where(eq(users.branch, branch));
+      // Extract the family data from the joined result
+      const allFamilies = allFamiliesResult.map(result => result.families);
+      return this.processFamiliesWithMembersOrphansAndRequests(allFamilies);
+    }
+
+    // Get ALL members in one query instead of 721 separate queries
+    const allMembers = await db.select().from(members);
+
+    // Get ALL orphans in one query instead of 721 separate queries
+    const allOrphans = await db.select().from(orphans);
+
+    // Get ALL requests in one query instead of 721 separate queries
+    const allRequests = await db.select().from(requests);
+
+    // Group members by familyId for O(1) lookup
+    const membersByFamilyId = new Map<number, Member[]>();
+    allMembers.forEach(member => {
+      if (!membersByFamilyId.has(member.familyId)) {
+        membersByFamilyId.set(member.familyId, []);
+      }
+      membersByFamilyId.get(member.familyId)!.push(member);
+    });
+
+    // Group orphans by familyId for O(1) lookup
+    const orphansByFamilyId = new Map<number, Orphan[]>();
+    allOrphans.forEach(orph => {
+      if (!orphansByFamilyId.has(orph.familyId)) {
+        orphansByFamilyId.set(orph.familyId, []);
+      }
+      orphansByFamilyId.get(orph.familyId)!.push(orph);
+    });
+
+    // Group requests by familyId for O(1) lookup
+    const requestsByFamilyId = new Map<number, Request[]>();
+    allRequests.forEach(request => {
+      if (!requestsByFamilyId.has(request.familyId)) {
+        requestsByFamilyId.set(request.familyId, []);
+      }
+      requestsByFamilyId.get(request.familyId)!.push(request);
+    });
+
+    // Combine families with their members, orphans, and requests
+    const familiesWithMembersOrphansAndRequests = allFamilies.map(family => ({
+      ...family,
+      members: membersByFamilyId.get(family.id) || [],
+      orphans: orphansByFamilyId.get(family.id) || [],
+      requests: requestsByFamilyId.get(family.id) || []
+    }));
+
+    return familiesWithMembersOrphansAndRequests;
+  }
+
+  // Helper method to process families with members, orphans, and requests
+  private async processFamiliesWithMembersOrphansAndRequests(
+    allFamilies: Family[]
+  ): Promise<(Family & { members: Member[]; orphans: Orphan[]; requests: Request[] })[]> {
     // Get ALL members in one query instead of 721 separate queries
     const allMembers = await db.select().from(members);
 

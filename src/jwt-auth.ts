@@ -7,6 +7,7 @@ export interface JWTPayload {
   id: number;
   username: string;
   role: string;
+  branch?: string;
   iat?: number;
   exp?: number;
 }
@@ -19,17 +20,18 @@ declare global {
   }
 }
 
-export function generateToken(user: { id: number; username: string; role: string }): string {
+export function generateToken(user: { id: number; username: string; role: string; branch?: string }): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error("JWT_SECRET environment variable is required");
   }
-  
+
   return jwt.sign(
-    { 
-      id: user.id, 
-      username: user.username, 
-      role: user.role 
+    {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      branch: user.branch
     },
     secret,
     { expiresIn: '1h' }
