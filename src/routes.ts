@@ -97,9 +97,8 @@ async function getFamilyByIdOrDualRole(familyId: number, user?: any) {
       return family; // Allow admin to access their own family (dual role)
     }
 
-    // Check if family belongs to the admin's branch
-    const familyUser = await storage.getUser(family.userId);
-    if (familyUser && familyUser.branch === user.branch) {
+    // Check if family belongs to the admin's branch by checking the family's own branch field
+    if (family.branch === user.branch) {
       return family;
     }
     return null; // Admin doesn't have access to this family
