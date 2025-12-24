@@ -677,12 +677,9 @@ export function registerRoutes(app: Express): Server {
   app.get("/api/family/:familyId/members", authMiddleware, async (req, res) => {
     try {
       const familyId = parseInt(req.params.familyId);
-      // Allow dual-role admin to access their family
-        const family = await storage.getFamily(familyId);
+      // Use getFamilyByIdOrDualRole to properly check branch access
+      const family = await getFamilyByIdOrDualRole(familyId, req.user);
       if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
-      if (isHeadOrDualRole(req.user!, family) && family.userId !== req.user!.id) {
-          return res.status(403).json({ message: "غير مصرح لك" });
-      }
       const members = await storage.getMembersByFamilyId(familyId);
       res.json(members);
     } catch (error) {
