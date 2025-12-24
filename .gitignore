@@ -87,3 +87,4 @@ pnpm-lock.yaml
 # Drizzle specific
 drizzle/
 !.env.example.env.bak
+.env.bak
