@@ -674,7 +674,7 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Update family priority
-  app.patch("/api/families/:id/priority", authMiddleware, async (req, res) => {
+  app.put("/api/families/:id/priority", authMiddleware, async (req, res) => {
     if (req.user!.role === 'head') return res.sendStatus(403);
 
     try {
