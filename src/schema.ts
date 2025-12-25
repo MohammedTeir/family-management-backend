@@ -68,6 +68,7 @@ export const families = pgTable("families", {
   numFemales: integer("num_females").notNull().default(0),
   socialStatus: varchar("social_status", { length: 50 }),
   adminNotes: text("admin_notes"),
+  priority: integer("priority").default(5), // Priority level (1-5, 5 is normal)
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   // Critical performance indexes
@@ -311,6 +312,7 @@ export const insertFamilySchema = createInsertSchema(families).omit({
   createdAt: true,
 }).extend({
   branch: z.string().optional(),
+  priority: z.number().min(1).max(5).default(5), // Priority level (1-5, 5 is normal)
 });
 
 export const insertMemberSchema = createInsertSchema(members).omit({

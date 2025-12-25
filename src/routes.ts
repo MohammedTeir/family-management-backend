@@ -641,11 +641,11 @@ export function registerRoutes(app: Express): Server {
   });
 
   app.put("/api/family/:id", authMiddleware, async (req, res) => {
-    
+
     try {
       const id = parseInt(req.params.id);
       const familyData = insertFamilySchema.partial().parse(req.body);
-      
+
       // Check ownership for head users
       if (req.user!.role === 'head') {
         const family = await storage.getFamily(id);
@@ -653,7 +653,7 @@ export function registerRoutes(app: Express): Server {
           return res.status(403).json({ message: "غير مصرح لك" });
         }
       }
-      
+
       const family = await storage.updateFamily(id, familyData);
       if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
 
@@ -669,6 +669,38 @@ export function registerRoutes(app: Express): Server {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "بيانات غير صحيحة", errors: error.errors });
       }
+      res.status(500).json({ message: "خطأ في الخادم" });
+    }
+  });
+
+  // Update family priority
+  app.patch("/api/families/:id/priority", authMiddleware, async (req, res) => {
+    if (req.user!.role === 'head') return res.sendStatus(403);
+
+    try {
+      const id = parseInt(req.params.id);
+      const { priority } = req.body;
+
+      if (typeof priority !== 'number' || priority < 1 || priority > 5) {
+        return res.status(400).json({ message: "يجب أن تكون الأولوية عددًا بين 1 و 5" });
+      }
+
+      // Use getFamilyByIdOrDualRole to check access based on branch
+      const family = await getFamilyByIdOrDualRole(id, req.user);
+      if (!family) return res.status(404).json({ message: "العائلة غير موجودة" });
+
+      const updatedFamily = await storage.updateFamily(id, { priority });
+      if (!updatedFamily) return res.status(404).json({ message: "العائلة غير موجودة" });
+
+      // Log the priority update
+      await storage.createLog({
+        type: 'family_priority_update',
+        message: `تم تحديث أولوية عائلة ${updatedFamily.husbandName} إلى ${priority} من قبل ${req.user!.username}`,
+        userId: req.user!.id,
+      });
+
+      res.json(updatedFamily);
+    } catch (error) {
       res.status(500).json({ message: "خطأ في الخادم" });
     }
   });
