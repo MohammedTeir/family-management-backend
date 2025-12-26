@@ -87,9 +87,9 @@ async function getFamilyByIdOrDualRole(familyId: number, user?: any) {
 
   // If user is provided and is an admin (not root), check if the family belongs to their branch
   if (user && user.role === 'admin') {
-    // If admin has no branch assigned, they can't access any families
+    // If admin has no branch assigned, they can access all families (like root)
     if (!user.branch) {
-      return null;
+      return family;
     }
 
     const userFamily = await storage.getFamilyByUserId(user.id);
@@ -1216,8 +1216,9 @@ export function registerRoutes(app: Express): Server {
       } else {
         // For admin/root users, apply branch filtering
         // Root users can see all requests
-        // Admin users only see requests from families in their branch
-        const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
+        // Root users and admin users without a branch can see all families
+        // Admin users with a branch only see families from their branch
+        const branchFilter = (req.user!.role === 'root' || !req.user!.branch) ? undefined : req.user!.branch;
 
         // Get all families based on branch filter
         const families = await storage.getAllFamilies(branchFilter);
@@ -1410,10 +1411,9 @@ export function registerRoutes(app: Express): Server {
     if (req.user!.role === 'head') return res.sendStatus(403);
 
     try {
-      // Filter by branch if the user is an admin (not root)
-      // Root users can see all families (branchFilter will be undefined)
-      // Admin users only see families from their branch (if assigned)
-      const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
+      // Root users and admin users without a branch can see all families
+      // Admin users with a branch only see families from their branch
+      const branchFilter = (req.user!.role === 'root' || !req.user!.branch) ? undefined : req.user!.branch;
       const families = await storage.getAllFamiliesWithMembersAndRequestsOptimized(branchFilter);
       // For each family, get the user and add gender-appropriate spouse data
       const familiesWithGenderAppropriateSpouse = await Promise.all(families.map(async (family) => {
@@ -1507,8 +1507,9 @@ export function registerRoutes(app: Express): Server {
     if (req.user!.role === 'head') return res.sendStatus(403);
 
     try {
-      // Apply branch filtering for admin users
-      const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
+      // Root users and admin users without a branch can see all families
+      // Admin users with a branch only see families from their branch
+      const branchFilter = (req.user!.role === 'root' || !req.user!.branch) ? undefined : req.user!.branch;
 
       // Get all families based on branch filter
       const families = await storage.getAllFamilies(branchFilter);
@@ -2387,9 +2388,9 @@ export function registerRoutes(app: Express): Server {
       
       console.log('📊 Backing up families...');
       // Filter by branch if the user is an admin (not root)
-      // Root users can see all families (branchFilter will be undefined)
-      // Admin users only see families from their branch (if assigned)
-      const branchFilter = req.user!.role === 'root' ? undefined : (req.user!.branch || null);
+      // Root users and admin users without a branch can see all families
+      // Admin users with a branch only see families from their branch
+      const branchFilter = (req.user!.role === 'root' || !req.user!.branch) ? undefined : req.user!.branch;
       const families = await storage.getAllFamilies(branchFilter);
       writeSection('families', families);
       console.log(`✅ Families: ${families.length} records`);
